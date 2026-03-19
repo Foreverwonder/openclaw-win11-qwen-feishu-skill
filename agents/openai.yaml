@@ -1,0 +1,4 @@
+interface:
+  display_name: "OpenClaw Win11 Qwen"
+  short_description: "Repair OpenClaw Win11 with Qwen and Feishu."
+  default_prompt: "Use $openclaw-win11-qwen-feishu to configure or repair OpenClaw on native Windows 11 with Qwen Coding Plan, Feishu, and the stable local dashboard flow."
