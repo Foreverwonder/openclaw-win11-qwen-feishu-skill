@@ -41,6 +41,10 @@ body {
   top: 10px;
   z-index: 5;
 }
+.sticky-status.collapsed #output {
+  min-height: 64px;
+  max-height: 64px;
+}
 .panel-inline {
   display: flex;
   align-items: center;
@@ -197,7 +201,8 @@ label { display: grid; gap: 8px; font-size: 14px; color: var(--muted); }
   word-break: break-word;
 }
 #output {
-  min-height: 128px;
+  min-height: 96px;
+  max-height: 180px;
   margin: 0;
   padding: 16px;
   border-radius: 16px;
@@ -205,6 +210,8 @@ label { display: grid; gap: 8px; font-size: 14px; color: var(--muted); }
   color: #f5e8d9;
   white-space: pre-wrap;
   word-break: break-word;
+  overflow: auto;
+  resize: vertical;
 }
 @media (max-width: 880px) {
   .hero { padding: 22px; grid-template-columns: 1fr; display: grid; }

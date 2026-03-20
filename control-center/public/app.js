@@ -1,4 +1,6 @@
 ﻿const output = document.getElementById("output");
+const stickyStatus = document.querySelector(".sticky-status");
+const toggleOutputBtn = document.getElementById("toggleOutputBtn");
 const statsGrid = document.getElementById("statsGrid");
 const pathList = document.getElementById("pathList");
 const memorySummary = document.getElementById("memorySummary");
@@ -14,6 +16,7 @@ const currentModelCard = document.getElementById("currentModelCard");
 const saveAndTestBtn = document.getElementById("saveAndTestBtn");
 const controlCenterLog = document.getElementById("controlCenterLog");
 const gatewayLog = document.getElementById("gatewayLog");
+let outputCollapsed = false;
 
 function statusClass(ok, warn = false) {
   if (ok) return "status-pill status-ok";
@@ -344,6 +347,12 @@ modelForm.addEventListener("submit", async (event) => {
 
 saveAndTestBtn.addEventListener("click", async () => {
   await submitModelForm({ testAfterSave: true });
+});
+
+toggleOutputBtn.addEventListener("click", () => {
+  outputCollapsed = !outputCollapsed;
+  stickyStatus.classList.toggle("collapsed", outputCollapsed);
+  toggleOutputBtn.textContent = outputCollapsed ? "??" : "??";
 });
 
 feishuForm.addEventListener("submit", async (event) => {

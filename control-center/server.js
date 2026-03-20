@@ -37,7 +37,10 @@ const BASE_ENV = {
 };
 
 function json(res, statusCode, payload) {
-  res.writeHead(statusCode, { "Content-Type": "application/json; charset=utf-8" });
+  res.writeHead(statusCode, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Cache-Control": "no-store",
+  });
   res.end(JSON.stringify(payload, null, 2));
 }
 
@@ -497,7 +500,10 @@ function serveStatic(req, res) {
     ".json": "application/json; charset=utf-8",
   }[ext] || "application/octet-stream";
 
-  res.writeHead(200, { "Content-Type": contentType });
+  res.writeHead(200, {
+    "Content-Type": contentType,
+    "Cache-Control": "no-store",
+  });
   fs.createReadStream(filePath).pipe(res);
 }
 
