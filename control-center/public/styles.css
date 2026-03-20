@@ -35,6 +35,13 @@ body {
   box-shadow: var(--shadow);
   backdrop-filter: blur(8px);
 }
+.panel.slim { padding: 14px 20px; }
+.panel-inline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
 .hero {
   padding: 28px;
   display: flex;
@@ -137,4 +144,5 @@ label { display: grid; gap: 8px; font-size: 14px; color: var(--muted); }
 @media (max-width: 880px) {
   .hero { padding: 22px; grid-template-columns: 1fr; display: grid; }
   .hero-actions { min-width: 0; }
+  .panel-inline { align-items: flex-start; flex-direction: column; }
 }

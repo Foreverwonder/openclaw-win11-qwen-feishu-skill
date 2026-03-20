@@ -7,6 +7,7 @@ const docsList = document.getElementById("docsList");
 const practiceList = document.getElementById("practiceList");
 const modelForm = document.getElementById("modelForm");
 const feishuForm = document.getElementById("feishuForm");
+const autoRefreshToggle = document.getElementById("autoRefreshToggle");
 
 function statusClass(ok, warn = false) {
   if (ok) return "status-pill status-ok";
@@ -260,3 +261,11 @@ feishuForm.addEventListener("submit", async (event) => {
 refresh().catch((error) => {
   setOutput("首次加载失败", error.message || String(error));
 });
+
+setInterval(() => {
+  if (autoRefreshToggle.checked) {
+    refresh().catch((error) => {
+      setOutput("自动刷新失败", error.message || String(error));
+    });
+  }
+}, 30000);
