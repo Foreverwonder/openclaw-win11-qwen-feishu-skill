@@ -29,7 +29,7 @@ for /f "usebackq delims=" %%I in (`powershell -NoProfile -Command "$env:Path='C:
 
 :open_default
 if exist "%EDGE%" (
-  start "" "%EDGE%" --new-window --proxy-server="direct://" --proxy-bypass-list="<-loopback>;127.0.0.1;localhost;::1" "%URL%"
+  start "" "%EDGE%" --new-tab --proxy-server="direct://" --proxy-bypass-list="<-loopback>;127.0.0.1;localhost;::1" "%URL%"
 ) else (
   start "" "%URL%"
 )

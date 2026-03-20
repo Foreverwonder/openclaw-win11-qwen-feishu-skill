@@ -509,7 +509,7 @@ async function performAction(action, payload = {}) {
     case "openDocs":
       if (fs.existsSync(EDGE)) {
         spawn(EDGE, [
-          "--new-window",
+          "--new-tab",
           '--proxy-server="direct://"',
           '--proxy-bypass-list="<-loopback>;127.0.0.1;localhost;::1"',
           payload.url || "https://docs.openclaw.ai/cli",

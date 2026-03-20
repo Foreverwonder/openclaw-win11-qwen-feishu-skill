@@ -96,7 +96,7 @@ if ($env:OPENCLAW_NO_BROWSER -ne "1") {
   $dashboardUrl = Get-DashboardUrl
   if (Test-Path $Edge) {
     Start-Process -FilePath $Edge -ArgumentList @(
-      "--new-window",
+      "--new-tab",
       '--proxy-server=direct://',
       '--proxy-bypass-list=<-loopback>;127.0.0.1;localhost;::1',
       $Url,
