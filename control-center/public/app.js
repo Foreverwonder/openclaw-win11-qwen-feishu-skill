@@ -8,6 +8,7 @@ const practiceList = document.getElementById("practiceList");
 const modelForm = document.getElementById("modelForm");
 const feishuForm = document.getElementById("feishuForm");
 const autoRefreshToggle = document.getElementById("autoRefreshToggle");
+const currentModelCard = document.getElementById("currentModelCard");
 
 function statusClass(ok, warn = false) {
   if (ok) return "status-pill status-ok";
@@ -108,6 +109,15 @@ function renderStats(status) {
   `).join("");
 }
 
+function renderCurrentModel(status) {
+  currentModelCard.innerHTML = `
+    <div><strong>当前默认模型</strong></div>
+    <div class="muted">${status.modelConfig.primary || "未设置"}</div>
+    <div class="muted">Base URL: ${status.modelConfig.baseUrl || "-"}</div>
+    <div class="muted">API: ${status.modelConfig.api || "-"}</div>
+  `;
+}
+
 function renderPaths(status) {
   pathList.innerHTML = Object.entries(status.paths).map(([label, value]) => `
     <div class="kv">
@@ -178,6 +188,7 @@ function fillForms(status) {
 async function refresh() {
   const status = await api("/api/status");
   renderStats(status);
+  renderCurrentModel(status);
   renderPaths(status);
   renderMemory(status);
   renderSkills(status);
@@ -198,6 +209,8 @@ document.getElementById("refreshChannelsBtn").addEventListener("click", refresh)
 document.addEventListener("click", async (event) => {
   const action = event.target.dataset.action;
   const docUrl = event.target.dataset.docUrl;
+  const presetModel = event.target.dataset.presetModel;
+  const presetName = event.target.dataset.presetName;
   if (action) {
     try {
       await runAction(action);
@@ -211,6 +224,16 @@ document.addEventListener("click", async (event) => {
     } catch (error) {
       setOutput("打开文档失败", error.message || String(error));
     }
+  }
+
+  if (presetModel) {
+    modelForm.modelId.value = presetModel;
+    modelForm.modelName.value = presetName || presetModel;
+    setOutput("已填入模型预设", {
+      modelId: presetModel,
+      modelName: presetName || presetModel,
+      nextStep: "现在直接点“保存模型配置”，再点“测试模型”即可。",
+    });
   }
 });
 
@@ -231,7 +254,13 @@ modelForm.addEventListener("submit", async (event) => {
       method: "POST",
       body: JSON.stringify(payload),
     });
-    setOutput("模型配置已保存", result);
+    setOutput("模型配置已保存", {
+      providerId: payload.providerId,
+      modelId: payload.modelId,
+      modelName: payload.modelName,
+      validation: result.stdout || result.message || result,
+      nextStep: "如果要确认联通性，直接点“测试模型”。",
+    });
     await refresh();
   } catch (error) {
     setOutput("模型配置保存失败", error.message || String(error));

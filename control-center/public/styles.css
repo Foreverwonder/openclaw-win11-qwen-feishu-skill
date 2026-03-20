@@ -36,11 +36,19 @@ body {
   backdrop-filter: blur(8px);
 }
 .panel.slim { padding: 14px 20px; }
+.sticky-status {
+  position: sticky;
+  top: 10px;
+  z-index: 5;
+}
 .panel-inline {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+.panel-head.compact {
+  margin-bottom: 10px;
 }
 .hero {
   padding: 28px;
@@ -79,6 +87,34 @@ h1 { font-size: clamp(28px, 4vw, 44px); line-height: 1.08; }
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.58);
   border: 1px solid var(--line);
+}
+.current-model {
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: rgba(181, 77, 46, 0.08);
+  border: 1px solid rgba(181, 77, 46, 0.18);
+}
+.quick-presets {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+}
+.preset-btn {
+  text-align: left;
+}
+.advanced-box {
+  border: 1px dashed var(--line);
+  border-radius: 16px;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.38);
+}
+.advanced-box summary {
+  cursor: pointer;
+  color: var(--accent-2);
+  font-weight: 600;
+}
+.advanced-fields {
+  margin-top: 12px;
 }
 .card h3 { font-size: 14px; color: var(--muted); margin-bottom: 10px; }
 .card strong { display: block; font-size: 24px; margin-bottom: 8px; }
@@ -132,7 +168,7 @@ label { display: grid; gap: 8px; font-size: 14px; color: var(--muted); }
 .doc-item a { color: var(--accent-2); text-decoration: none; }
 .doc-item a:hover { text-decoration: underline; }
 #output {
-  min-height: 180px;
+  min-height: 128px;
   margin: 0;
   padding: 16px;
   border-radius: 16px;
