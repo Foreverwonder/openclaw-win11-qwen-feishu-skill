@@ -60,11 +60,24 @@ function Wait-Http200 {
   return $false
 }
 
+function Get-ProcessByNeedle {
+  param(
+    [string]$Needle
+  )
+
+  Get-CimInstance Win32_Process | Where-Object {
+    $_.CommandLine -and $_.CommandLine -like "*$Needle*"
+  }
+}
+
 function Start-GatewayIfNeeded {
-  Start-Process -FilePath "cmd.exe" -ArgumentList "/c", $Supervisor -WindowStyle Minimized | Out-Null
+  $supervisorProcs = @(Get-ProcessByNeedle -Needle "gateway-supervisor.cmd")
+  if ($supervisorProcs.Count -eq 0) {
+    Start-Process -FilePath "cmd.exe" -ArgumentList "/c", $Supervisor -WindowStyle Hidden | Out-Null
+  }
 
   if (-not (Test-Http200 -TargetUrl $GatewayUrl -TimeoutSeconds 2)) {
-    Start-Process -FilePath "cmd.exe" -ArgumentList "/c", $GatewayStart -WindowStyle Minimized | Out-Null
+    Start-Process -FilePath "cmd.exe" -ArgumentList "/c", $GatewayStart -WindowStyle Hidden | Out-Null
     [void](Wait-Http200 -TargetUrl $GatewayUrl -Retries 8 -DelaySeconds 2)
   }
 }

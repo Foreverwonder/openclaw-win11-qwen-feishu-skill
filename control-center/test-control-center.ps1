@@ -9,6 +9,11 @@ function Get-ControlCenterProcesses {
     Where-Object { $_.CommandLine -like "*control-center\server.js*" }
 }
 
+function Get-SupervisorProcesses {
+  Get-CimInstance Win32_Process |
+    Where-Object { $_.CommandLine -like "*gateway-supervisor.cmd*" }
+}
+
 function Stop-ControlCenterProcesses {
   $procs = Get-ControlCenterProcesses
   foreach ($proc in $procs) {
@@ -16,6 +21,21 @@ function Stop-ControlCenterProcesses {
       Stop-Process -Id $proc.ProcessId -Force -ErrorAction Stop
     } catch {
       Write-Host "skip stop $($proc.ProcessId): $($_.Exception.Message)"
+    }
+  }
+}
+
+function Stop-DuplicateSupervisors {
+  $procs = @(Get-SupervisorProcesses | Sort-Object ProcessId)
+  if ($procs.Count -le 1) {
+    return
+  }
+
+  foreach ($proc in $procs | Select-Object -Skip 1) {
+    try {
+      Stop-Process -Id $proc.ProcessId -Force -ErrorAction Stop
+    } catch {
+      Write-Host "skip stop supervisor $($proc.ProcessId): $($_.Exception.Message)"
     }
   }
 }
@@ -54,6 +74,7 @@ function Assert-True {
 
 Write-Host "== Baseline cleanup =="
 Stop-ControlCenterProcesses
+Stop-DuplicateSupervisors
 Start-Sleep -Seconds 1
 
 Write-Host "== Cold start launch =="
@@ -64,6 +85,8 @@ Assert-True $coldStartOk "Cold start failed: control center did not respond with
 
 $firstProcs = @(Get-ControlCenterProcesses)
 Assert-True ($firstProcs.Count -eq 1) "Expected exactly 1 control-center process after cold start, got $($firstProcs.Count)."
+$firstSupervisors = @(Get-SupervisorProcesses)
+Assert-True ($firstSupervisors.Count -eq 1) "Expected exactly 1 gateway supervisor after cold start, got $($firstSupervisors.Count)."
 
 Write-Host "== Repeat click launch =="
 Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "`"$launcher`"" -WindowStyle Hidden | Out-Null
@@ -73,9 +96,12 @@ Assert-True $repeatOk "Second launch failed: control center did not stay reachab
 
 $secondProcs = @(Get-ControlCenterProcesses)
 Assert-True ($secondProcs.Count -eq 1) "Expected exactly 1 control-center process after repeated launch, got $($secondProcs.Count)."
+$secondSupervisors = @(Get-SupervisorProcesses)
+Assert-True ($secondSupervisors.Count -eq 1) "Expected exactly 1 gateway supervisor after repeated launch, got $($secondSupervisors.Count)."
 
 Write-Host ""
 Write-Host "PASS"
 Write-Host "cold_start_http200 = $coldStartOk"
 Write-Host "repeat_launch_http200 = $repeatOk"
 Write-Host "process_count = $($secondProcs.Count)"
+Write-Host "supervisor_count = $($secondSupervisors.Count)"
