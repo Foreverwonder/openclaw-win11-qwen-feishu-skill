@@ -3,6 +3,7 @@ $ErrorActionPreference = "Stop"
 $Root = "D:\AI_Projects\openclaw\control-center"
 $Url = "http://127.0.0.1:18809/"
 $GatewayUrl = "http://127.0.0.1:18789/"
+$ConfigPath = "C:\Users\71976\.openclaw\openclaw.json"
 $Edge = "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
 $NodeExe = "C:\Program Files\nodejs\node.exe"
 $ServerJs = Join-Path $Root "server.js"
@@ -14,6 +15,19 @@ $env:NO_PROXY = "localhost,127.0.0.1,::1"
 $env:no_proxy = "localhost,127.0.0.1,::1"
 $env:OPENCLAW_CONFIG_PATH = "C:\Users\71976\.openclaw\openclaw.json"
 $env:OPENCLAW_STATE_DIR = "C:\Users\71976\.openclaw"
+
+function Get-DashboardUrl {
+  try {
+    $config = Get-Content -Raw $ConfigPath | ConvertFrom-Json
+    $token = $config.gateway.auth.token
+    if ($token) {
+      return "http://127.0.0.1:18789/#token=$token"
+    }
+  } catch {
+  }
+
+  return $GatewayUrl
+}
 
 function Test-Http200 {
   param(
@@ -79,14 +93,17 @@ Start-GatewayIfNeeded
 Start-ControlCenterIfNeeded
 
 if ($env:OPENCLAW_NO_BROWSER -ne "1") {
+  $dashboardUrl = Get-DashboardUrl
   if (Test-Path $Edge) {
     Start-Process -FilePath $Edge -ArgumentList @(
       "--new-window",
       '--proxy-server=direct://',
       '--proxy-bypass-list=<-loopback>;127.0.0.1;localhost;::1',
-      $Url
+      $Url,
+      $dashboardUrl
     ) | Out-Null
   } else {
     Start-Process -FilePath $Url | Out-Null
+    Start-Process -FilePath $dashboardUrl | Out-Null
   }
 }

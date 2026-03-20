@@ -403,6 +403,7 @@ async function saveModelConfig(payload) {
   const modelId = payload.modelId || "qwen3.5-plus";
   const modelName = payload.modelName || modelId;
   const primary = `${providerId}/${modelId}`;
+  const legacyPrimary = `${providerId}/${modelId.replace(/-/g, " ")}`;
 
   config.env = config.env || {};
   const existingApiKey = config?.env?.QWEN_CODING_PLAN_API_KEY || "";
@@ -427,7 +428,14 @@ async function saveModelConfig(payload) {
   config.agents.defaults = config.agents.defaults || {};
   config.agents.defaults.model = { primary };
   config.agents.defaults.models = config.agents.defaults.models || {};
+  delete config.agents.defaults.models[legacyPrimary];
   config.agents.defaults.models[primary] = { alias: modelName };
+  config.agents.list = Array.isArray(config.agents.list) ? config.agents.list : [];
+  config.agents.list = config.agents.list.map((agent) =>
+    agent && agent.id === "main"
+      ? { ...agent, model: primary }
+      : agent
+  );
   writeJson(CONFIG_PATH, config);
   pushModelHistory({
     savedAt: new Date().toISOString(),
