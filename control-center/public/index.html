@@ -1,0 +1,124 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OpenClaw Control Center</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Win11 Native Control Center</p>
+          <h1>OpenClaw 一键管理台</h1>
+          <p class="subtitle">用本地白名单动作把 Dashboard、网关、模型、记忆、技能、目录入口收在一个页里。</p>
+        </div>
+        <div class="hero-actions">
+          <button class="primary" data-action="openDashboard">打开 Dashboard</button>
+          <button data-action="ensureGateway">拉起网关</button>
+          <button data-action="restartGateway">重启网关</button>
+          <button id="refreshBtn">刷新状态</button>
+        </div>
+      </header>
+
+      <section class="grid stats" id="statsGrid"></section>
+
+      <section class="grid two-col">
+        <article class="panel">
+          <div class="panel-head">
+            <h2>模型配置</h2>
+            <span class="panel-tip">推荐走显式 custom provider</span>
+          </div>
+          <form id="modelForm" class="stack">
+            <label>Provider ID<input name="providerId" placeholder="qwen-coding-plan" /></label>
+            <label>Base URL<input name="baseUrl" placeholder="https://coding.dashscope.aliyuncs.com/v1" /></label>
+            <label>API 类型<input name="api" placeholder="openai-completions" /></label>
+            <label>Model ID<input name="modelId" placeholder="qwen3.5-plus" /></label>
+            <label>显示名<input name="modelName" placeholder="Qwen 3.5 Plus (Qwen Coding Plan)" /></label>
+            <label>API Key<input name="apiKey" type="password" placeholder="sk-..." /></label>
+            <label class="inline-check"><input name="reasoning" type="checkbox" /><span>启用 reasoning</span></label>
+            <div class="row">
+              <button class="primary" type="submit">保存模型配置</button>
+              <button type="button" data-action="testModel">测试模型</button>
+              <button type="button" data-action="validateConfig">校验配置</button>
+            </div>
+          </form>
+        </article>
+
+        <article class="panel">
+          <div class="panel-head">
+            <h2>飞书配置</h2>
+            <span class="panel-tip">保持插件和 channel 同步</span>
+          </div>
+          <form id="feishuForm" class="stack">
+            <label>App ID<input name="appId" placeholder="cli_xxx" /></label>
+            <label>App Secret<input name="appSecret" type="password" placeholder="secret" /></label>
+            <label class="inline-check"><input name="enabled" type="checkbox" /><span>启用飞书集成</span></label>
+            <div class="row">
+              <button class="primary" type="submit">保存飞书配置</button>
+              <button type="button" id="refreshChannelsBtn">刷新频道状态</button>
+            </div>
+          </form>
+        </article>
+      </section>
+
+      <section class="grid two-col">
+        <article class="panel">
+          <div class="panel-head">
+            <h2>记忆与索引</h2>
+            <span class="panel-tip">先建目录，再强制重建索引</span>
+          </div>
+          <div id="memorySummary" class="stack"></div>
+          <div class="row">
+            <button data-action="memorySetup">创建记忆目录</button>
+            <button class="primary" data-action="reindexMemory">重建记忆索引</button>
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-head">
+            <h2>文件与目录</h2>
+            <span class="panel-tip">常用入口都放这里</span>
+          </div>
+          <div id="pathList" class="path-list"></div>
+          <div class="row wrap">
+            <button data-action="openConfigFolder">打开配置目录</button>
+            <button data-action="openWorkspaceFolder">打开 Workspace</button>
+            <button data-action="openManagedSkillsFolder">打开 OpenClaw Skills</button>
+            <button data-action="openSkillsFolder">打开 Codex Skills</button>
+          </div>
+        </article>
+      </section>
+
+      <section class="grid two-col">
+        <article class="panel">
+          <div class="panel-head">
+            <h2>技能清单</h2>
+            <span class="panel-tip">只显示前 12 个，避免刷屏</span>
+          </div>
+          <div id="skillsList" class="skills-list"></div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-head">
+            <h2>官方文档与实践</h2>
+            <span class="panel-tip">基于官方 CLI 能力做一键化</span>
+          </div>
+          <div id="docsList" class="docs-list"></div>
+          <div id="practiceList" class="practice-list"></div>
+        </article>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>操作结果</h2>
+          <span class="panel-tip">这里会显示最近一次动作的返回</span>
+        </div>
+        <pre id="output">等待操作…</pre>
+      </section>
+    </div>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
