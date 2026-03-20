@@ -19,8 +19,11 @@ const MANAGED_SKILLS_DIR = path.join(OPENCLAW_DIR, "skills");
 const CODEX_SKILLS_DIR = path.join(USER_HOME, ".codex", "skills");
 const DASHBOARD_LAUNCHER = path.join(PROJECT_DIR, "openclaw-dashboard-stable.cmd");
 const SUPERVISOR = path.join(OPENCLAW_DIR, "gateway-supervisor.cmd");
+const NODE_EXE = "C:\\Program Files\\nodejs\\node.exe";
+const OPENCLAW_ENTRY = "C:\\Users\\71976\\AppData\\Roaming\\npm\\node_modules\\openclaw\\dist\\index.js";
 const EDGE = "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe";
 const DEFAULT_GATEWAY_URL = "http://127.0.0.1:18789/";
+let lastEnsureGatewayAt = 0;
 
 const BASE_ENV = {
   ...process.env,
@@ -205,6 +208,7 @@ function httpCheck(targetUrl) {
 }
 
 async function ensureGateway() {
+  lastEnsureGatewayAt = Date.now();
   spawn("cmd.exe", ["/c", "start", "", "/min", "cmd", "/c", `"${SUPERVISOR}"`], {
     cwd: PROJECT_DIR,
     env: BASE_ENV,
@@ -212,6 +216,30 @@ async function ensureGateway() {
     windowsHide: true,
     stdio: "ignore",
   }).unref();
+
+  spawn(
+    "cmd.exe",
+    [
+      "/c",
+      "start",
+      "",
+      "/min",
+      "cmd",
+      "/c",
+      `"${NODE_EXE}" "${OPENCLAW_ENTRY}" gateway run --port 18789 --ws-log compact`,
+    ],
+    {
+      cwd: USER_HOME,
+      env: {
+        ...BASE_ENV,
+        OPENCLAW_CONFIG_PATH: CONFIG_PATH,
+        OPENCLAW_STATE_DIR: OPENCLAW_DIR,
+      },
+      detached: true,
+      windowsHide: true,
+      stdio: "ignore",
+    }
+  ).unref();
 
   for (let i = 0; i < 8; i += 1) {
     const probe = await httpCheck(DEFAULT_GATEWAY_URL);
@@ -271,6 +299,9 @@ async function collectStatus() {
   const config = readJson(CONFIG_PATH, {});
   const state = readJson(CONTROL_STATE_PATH, { modelHistory: [] });
   const gatewayProbe = await httpCheck(DEFAULT_GATEWAY_URL);
+  if (!gatewayProbe.ok && Date.now() - lastEnsureGatewayAt > 20000) {
+    ensureGateway().catch(() => {});
+  }
   const tokenArg = config?.gateway?.auth?.token ? ` --token ${config.gateway.auth.token}` : "";
   const [modelsRaw, memoryRaw, channelsRaw, skillsRaw, browserRaw] = await Promise.all([
     runOpenClaw("models status --json"),
