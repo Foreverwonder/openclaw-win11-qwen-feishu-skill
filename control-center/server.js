@@ -53,6 +53,12 @@ function writeJson(filePath, data) {
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2) + "\n", "utf8");
 }
 
+function maskSecret(value) {
+  if (!value) return "";
+  if (value.length <= 10) return "********";
+  return `${value.slice(0, 6)}...${value.slice(-4)}`;
+}
+
 function runPowerShell(command, timeoutMs = 120000) {
   return new Promise((resolve) => {
     execFile(
@@ -139,33 +145,46 @@ async function restartGateway() {
 }
 
 function extractJson(output) {
-  const trimmed = (output || "").trim();
-  if (!trimmed) return null;
-  const candidates = [trimmed];
-  const firstBrace = trimmed.indexOf("{");
-  const firstBracket = trimmed.indexOf("[");
-  const start = [firstBrace, firstBracket].filter((v) => v >= 0).sort((a, b) => a - b)[0];
-  if (typeof start === "number") {
-    candidates.push(trimmed.slice(start));
+  const cleaned = (output || "")
+    .replace(/\u0000/g, "")
+    .replace(/\u001b\[[0-9;]*m/g, "")
+    .trim();
+  if (!cleaned) return null;
+
+  const starts = [cleaned.indexOf("{"), cleaned.indexOf("[")].filter((v) => v >= 0);
+  const ends = [cleaned.lastIndexOf("}"), cleaned.lastIndexOf("]")].filter((v) => v >= 0);
+  const candidates = [cleaned];
+
+  for (const start of starts) {
+    for (const end of ends) {
+      if (end > start) {
+        candidates.push(cleaned.slice(start, end + 1));
+      }
+    }
+    candidates.push(cleaned.slice(start));
   }
+
   for (const candidate of candidates) {
     try {
       return JSON.parse(candidate);
     } catch {
+      // keep trying
     }
   }
+
   return null;
 }
 
 async function collectStatus() {
   const config = readJson(CONFIG_PATH, {});
   const gatewayProbe = await httpCheck(DEFAULT_GATEWAY_URL);
+  const tokenArg = config?.gateway?.auth?.token ? ` --token ${config.gateway.auth.token}` : "";
   const [modelsRaw, memoryRaw, channelsRaw, skillsRaw, browserRaw] = await Promise.all([
     runOpenClaw("models status --json"),
     runOpenClaw("memory status --json"),
     runOpenClaw("channels status --json"),
     runOpenClaw("skills list --json"),
-    runOpenClaw("browser status --json"),
+    runOpenClaw(`browser status --json${tokenArg}`),
   ]);
 
   const primaryModel = config?.agents?.defaults?.model?.primary || "未设置";
@@ -204,12 +223,12 @@ async function collectStatus() {
       modelName: modelEntry?.name || "",
       reasoning: Boolean(modelEntry?.reasoning),
       primary: primaryModel,
-      apiKey: config?.env?.QWEN_CODING_PLAN_API_KEY || "",
+      apiKeyMasked: maskSecret(config?.env?.QWEN_CODING_PLAN_API_KEY || ""),
     },
     feishuConfig: {
       enabled: Boolean(feishu?.enabled),
       appId: feishu?.appId || "",
-      appSecret: feishu?.appSecret || "",
+      appSecretMasked: maskSecret(feishu?.appSecret || ""),
     },
     memoryFolderExists: fs.existsSync(MEMORY_DIR),
     raw: {
@@ -248,7 +267,8 @@ async function saveModelConfig(payload) {
   const primary = `${providerId}/${modelId}`;
 
   config.env = config.env || {};
-  config.env.QWEN_CODING_PLAN_API_KEY = payload.apiKey || "";
+  const existingApiKey = config?.env?.QWEN_CODING_PLAN_API_KEY || "";
+  config.env.QWEN_CODING_PLAN_API_KEY = payload.apiKey || existingApiKey;
   config.models = config.models || {};
   config.models.mode = config.models.mode || "merge";
   config.models.providers = config.models.providers || {};
@@ -276,11 +296,12 @@ async function saveModelConfig(payload) {
 
 async function saveFeishuConfig(payload) {
   const config = readJson(CONFIG_PATH, {});
+  const existingSecret = config?.channels?.feishu?.appSecret || "";
   config.channels = config.channels || {};
   config.channels.feishu = {
     ...(config.channels.feishu || {}),
     appId: payload.appId || "",
-    appSecret: payload.appSecret || "",
+    appSecret: payload.appSecret || existingSecret,
     enabled: Boolean(payload.enabled),
   };
   config.plugins = config.plugins || {};

@@ -164,11 +164,13 @@ function fillForms(status) {
   modelForm.api.value = status.modelConfig.api || "";
   modelForm.modelId.value = status.modelConfig.modelId || "";
   modelForm.modelName.value = status.modelConfig.modelName || "";
-  modelForm.apiKey.value = status.modelConfig.apiKey || "";
+  modelForm.apiKey.value = "";
+  modelForm.apiKey.placeholder = status.modelConfig.apiKeyMasked || "sk-...";
   modelForm.reasoning.checked = Boolean(status.modelConfig.reasoning);
 
   feishuForm.appId.value = status.feishuConfig.appId || "";
-  feishuForm.appSecret.value = status.feishuConfig.appSecret || "";
+  feishuForm.appSecret.value = "";
+  feishuForm.appSecret.placeholder = status.feishuConfig.appSecretMasked || "secret";
   feishuForm.enabled.checked = Boolean(status.feishuConfig.enabled);
 }
 
