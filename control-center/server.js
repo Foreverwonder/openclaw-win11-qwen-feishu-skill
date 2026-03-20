@@ -8,6 +8,7 @@ const HOST = "127.0.0.1";
 const PORT = 18809;
 const ROOT = __dirname;
 const PUBLIC_DIR = path.join(ROOT, "public");
+const CONTROL_STATE_PATH = path.join(ROOT, "control-center-state.json");
 const PROJECT_DIR = path.resolve(ROOT, "..");
 const USER_HOME = os.homedir();
 const OPENCLAW_DIR = path.join(USER_HOME, ".openclaw");
@@ -57,6 +58,94 @@ function maskSecret(value) {
   if (!value) return "";
   if (value.length <= 10) return "********";
   return `${value.slice(0, 6)}...${value.slice(-4)}`;
+}
+
+function tailFile(filePath, maxLines = 40) {
+  if (!fs.existsSync(filePath)) {
+    return [];
+  }
+  return fs.readFileSync(filePath, "utf8").split(/\r?\n/).filter(Boolean).slice(-maxLines);
+}
+
+function collectWarnings(...stderrList) {
+  return [...new Set(
+    stderrList
+      .filter(Boolean)
+      .flatMap((item) => String(item).split(/\r?\n/))
+      .map((line) => line.trim())
+      .filter(Boolean)
+  )].slice(0, 20);
+}
+
+function pushModelHistory(entry) {
+  const state = readJson(CONTROL_STATE_PATH, { modelHistory: [] });
+  const history = Array.isArray(state.modelHistory) ? state.modelHistory : [];
+  const next = [
+    entry,
+    ...history.filter(
+      (item) =>
+        !(
+          item.providerId === entry.providerId &&
+          item.modelId === entry.modelId &&
+          item.baseUrl === entry.baseUrl &&
+          item.api === entry.api
+        )
+    ),
+  ].slice(0, 8);
+  writeJson(CONTROL_STATE_PATH, { ...state, modelHistory: next });
+  return next;
+}
+
+async function directModelTest() {
+  const config = readJson(CONFIG_PATH, {});
+  const primaryModel = config?.agents?.defaults?.model?.primary || "";
+  const providerId = primaryModel.includes("/") ? primaryModel.split("/")[0] : "";
+  const modelId = primaryModel.includes("/") ? primaryModel.split("/").slice(1).join("/") : "";
+  const provider = config?.models?.providers?.[providerId];
+  const apiKey = config?.env?.QWEN_CODING_PLAN_API_KEY || "";
+  const baseUrl = provider?.baseUrl || "";
+  const endpoint = `${baseUrl.replace(/\/$/, "")}/chat/completions`;
+
+  if (!providerId || !modelId || !baseUrl || !apiKey) {
+    return {
+      ok: false,
+      message: "当前模型配置不完整，无法做直连测试。",
+      details: { providerId, modelId, baseUrl: Boolean(baseUrl), apiKey: Boolean(apiKey) },
+    };
+  }
+
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: modelId,
+      messages: [{ role: "user", content: "Reply with OK only." }],
+      max_tokens: 20,
+      temperature: 0,
+    }),
+  });
+
+  const text = await response.text();
+  let data = null;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    data = null;
+  }
+
+  const content = data?.choices?.[0]?.message?.content || data?.error?.message || text;
+  return {
+    ok: response.ok,
+    status: response.status,
+    endpoint,
+    providerId,
+    modelId,
+    content,
+    raw: data || text,
+  };
 }
 
 function runPowerShell(command, timeoutMs = 120000) {
@@ -177,6 +266,7 @@ function extractJson(output) {
 
 async function collectStatus() {
   const config = readJson(CONFIG_PATH, {});
+  const state = readJson(CONTROL_STATE_PATH, { modelHistory: [] });
   const gatewayProbe = await httpCheck(DEFAULT_GATEWAY_URL);
   const tokenArg = config?.gateway?.auth?.token ? ` --token ${config.gateway.auth.token}` : "";
   const [modelsRaw, memoryRaw, channelsRaw, skillsRaw, browserRaw] = await Promise.all([
@@ -231,12 +321,26 @@ async function collectStatus() {
       appSecretMasked: maskSecret(feishu?.appSecret || ""),
     },
     memoryFolderExists: fs.existsSync(MEMORY_DIR),
+    history: {
+      modelHistory: Array.isArray(state.modelHistory) ? state.modelHistory : [],
+    },
     raw: {
       models: { ok: modelsRaw.ok, data: extractJson(modelsRaw.stdout), stderr: modelsRaw.stderr || null },
       memory: { ok: memoryRaw.ok, data: extractJson(memoryRaw.stdout), stderr: memoryRaw.stderr || null },
       channels: { ok: channelsRaw.ok, data: extractJson(channelsRaw.stdout), stderr: channelsRaw.stderr || null },
       skills: { ok: skillsRaw.ok, data: extractJson(skillsRaw.stdout), stderr: skillsRaw.stderr || null },
       browser: { ok: browserRaw.ok, data: extractJson(browserRaw.stdout), stderr: browserRaw.stderr || null },
+    },
+    warnings: collectWarnings(
+      modelsRaw.stderr,
+      memoryRaw.stderr,
+      channelsRaw.stderr,
+      skillsRaw.stderr,
+      browserRaw.stderr
+    ),
+    logs: {
+      controlCenter: tailFile(path.join(ROOT, "control-center.log")),
+      gatewaySupervisor: tailFile(path.join(OPENCLAW_DIR, "gateway-supervisor.log")),
     },
     docs: [
       { title: "Windows / FAQ", url: "https://docs.openclaw.ai/help/faq" },
@@ -291,6 +395,15 @@ async function saveModelConfig(payload) {
   config.agents.defaults.models = config.agents.defaults.models || {};
   config.agents.defaults.models[primary] = { alias: modelName };
   writeJson(CONFIG_PATH, config);
+  pushModelHistory({
+    savedAt: new Date().toISOString(),
+    providerId,
+    modelId,
+    modelName,
+    baseUrl: payload.baseUrl || "https://coding.dashscope.aliyuncs.com/v1",
+    api: payload.api || "openai-completions",
+    reasoning: Boolean(payload.reasoning),
+  });
   return runOpenClaw("config validate");
 }
 
@@ -332,7 +445,7 @@ async function performAction(action, payload = {}) {
     case "validateConfig":
       return runOpenClaw("config validate");
     case "testModel":
-      return runOpenClaw('agent --agent main --message "Reply with OK only." --json --timeout 120', 180000);
+      return directModelTest();
     case "memorySetup":
       fs.mkdirSync(MEMORY_DIR, { recursive: true });
       return { ok: true, message: `已确保记忆目录存在：${MEMORY_DIR}` };
@@ -416,6 +529,11 @@ const server = http.createServer(async (req, res) => {
   try {
     if (req.method === "GET" && req.url === "/api/status") {
       return json(res, 200, await collectStatus());
+    }
+
+    if (req.method === "GET" && req.url === "/api/logs") {
+      const status = await collectStatus();
+      return json(res, 200, status.logs);
     }
 
     if (req.method === "POST" && req.url === "/api/action") {

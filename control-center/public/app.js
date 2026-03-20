@@ -5,10 +5,15 @@ const memorySummary = document.getElementById("memorySummary");
 const skillsList = document.getElementById("skillsList");
 const docsList = document.getElementById("docsList");
 const practiceList = document.getElementById("practiceList");
+const warningsList = document.getElementById("warningsList");
+const modelHistoryList = document.getElementById("modelHistoryList");
 const modelForm = document.getElementById("modelForm");
 const feishuForm = document.getElementById("feishuForm");
 const autoRefreshToggle = document.getElementById("autoRefreshToggle");
 const currentModelCard = document.getElementById("currentModelCard");
+const saveAndTestBtn = document.getElementById("saveAndTestBtn");
+const controlCenterLog = document.getElementById("controlCenterLog");
+const gatewayLog = document.getElementById("gatewayLog");
 
 function statusClass(ok, warn = false) {
   if (ok) return "status-pill status-ok";
@@ -169,6 +174,34 @@ function renderDocs(status) {
   practiceList.innerHTML = status.bestPractices.map((item) => `<div class="practice-item">${item}</div>`).join("");
 }
 
+function renderWarnings(status) {
+  const warnings = status.warnings || [];
+  warningsList.innerHTML = warnings.length
+    ? warnings.map((item) => `<div class="warning-item">${item}</div>`).join("")
+    : `<div class="warning-item">当前没有新的高优先级告警。</div>`;
+}
+
+function renderModelHistory(status) {
+  const history = status.history?.modelHistory || [];
+  modelHistoryList.innerHTML = history.length
+    ? history.map((item, index) => `
+      <div class="history-item">
+        <strong>${index + 1}. ${item.providerId}/${item.modelId}</strong>
+        <div class="muted">${item.modelName || item.modelId}</div>
+        <div class="muted">${item.savedAt || ""}</div>
+        <div class="row">
+          <button data-history-index="${index}">回填这个模型</button>
+        </div>
+      </div>
+    `).join("")
+    : `<div class="history-item">你保存过的模型会显示在这里。</div>`;
+}
+
+function renderLogs(status) {
+  controlCenterLog.textContent = (status.logs?.controlCenter || []).join("\n") || "暂无日志";
+  gatewayLog.textContent = (status.logs?.gatewaySupervisor || []).join("\n") || "暂无日志";
+}
+
 function fillForms(status) {
   modelForm.providerId.value = status.modelConfig.providerId || "qwen-coding-plan";
   modelForm.baseUrl.value = status.modelConfig.baseUrl || "";
@@ -193,6 +226,9 @@ async function refresh() {
   renderMemory(status);
   renderSkills(status);
   renderDocs(status);
+  renderWarnings(status);
+  renderModelHistory(status);
+  renderLogs(status);
   fillForms(status);
   setOutput("状态已刷新", {
     generatedAt: status.generatedAt,
@@ -211,6 +247,7 @@ document.addEventListener("click", async (event) => {
   const docUrl = event.target.dataset.docUrl;
   const presetModel = event.target.dataset.presetModel;
   const presetName = event.target.dataset.presetName;
+  const historyIndex = event.target.dataset.historyIndex;
   if (action) {
     try {
       await runAction(action);
@@ -235,10 +272,32 @@ document.addEventListener("click", async (event) => {
       nextStep: "现在直接点“保存模型配置”，再点“测试模型”即可。",
     });
   }
+
+  if (historyIndex !== undefined) {
+    try {
+      const status = await api("/api/status");
+      const picked = status.history?.modelHistory?.[Number(historyIndex)];
+      if (picked) {
+        modelForm.providerId.value = picked.providerId || "qwen-coding-plan";
+        modelForm.baseUrl.value = picked.baseUrl || "";
+        modelForm.api.value = picked.api || "";
+        modelForm.modelId.value = picked.modelId || "";
+        modelForm.modelName.value = picked.modelName || picked.modelId || "";
+        modelForm.reasoning.checked = Boolean(picked.reasoning);
+        setOutput("已回填历史模型", {
+          providerId: picked.providerId,
+          modelId: picked.modelId,
+          modelName: picked.modelName,
+          nextStep: "现在点“保存模型配置”，即可切回这个模型。",
+        });
+      }
+    } catch (error) {
+      setOutput("回填历史模型失败", error.message || String(error));
+    }
+  }
 });
 
-modelForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
+async function submitModelForm({ testAfterSave = false } = {}) {
   const payload = {
     providerId: modelForm.providerId.value.trim(),
     baseUrl: modelForm.baseUrl.value.trim(),
@@ -254,17 +313,37 @@ modelForm.addEventListener("submit", async (event) => {
       method: "POST",
       body: JSON.stringify(payload),
     });
-    setOutput("模型配置已保存", {
+    const summary = {
       providerId: payload.providerId,
       modelId: payload.modelId,
       modelName: payload.modelName,
       validation: result.stdout || result.message || result,
-      nextStep: "如果要确认联通性，直接点“测试模型”。",
-    });
+      nextStep: testAfterSave ? "正在继续执行模型测试。" : "如果要确认联通性，直接点“测试模型”。",
+    };
+    setOutput("模型配置已保存", summary);
+    if (testAfterSave) {
+      const testResult = await api("/api/action", {
+        method: "POST",
+        body: JSON.stringify({ action: "testModel", payload: {} }),
+      });
+      setOutput("保存并测试完成", {
+        ...summary,
+        test: testResult.stdout || testResult.message || testResult,
+      });
+    }
     await refresh();
   } catch (error) {
     setOutput("模型配置保存失败", error.message || String(error));
   }
+}
+
+modelForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  await submitModelForm({ testAfterSave: false });
+});
+
+saveAndTestBtn.addEventListener("click", async () => {
+  await submitModelForm({ testAfterSave: true });
 });
 
 feishuForm.addEventListener("submit", async (event) => {

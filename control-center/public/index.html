@@ -40,6 +40,24 @@
         </div>
       </section>
 
+      <section class="grid two-col">
+        <article class="panel">
+          <div class="panel-head">
+            <h2>告警</h2>
+            <span class="panel-tip">把配置缺项和 CLI warning 单独抬出来</span>
+          </div>
+          <div id="warningsList" class="warnings-list"></div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-head">
+            <h2>最近模型</h2>
+            <span class="panel-tip">一键回填，再保存即可回滚</span>
+          </div>
+          <div id="modelHistoryList" class="history-list"></div>
+        </article>
+      </section>
+
       <section class="grid stats" id="statsGrid"></section>
 
       <section class="grid two-col">
@@ -52,8 +70,11 @@
             <div class="current-model" id="currentModelCard"></div>
             <div class="quick-presets">
               <button type="button" class="preset-btn" data-preset-model="qwen3.5-plus" data-preset-name="Qwen 3.5 Plus (Qwen Coding Plan)">切到 `qwen3.5-plus`</button>
-              <button type="button" class="preset-btn" data-preset-model="qwen-max" data-preset-name="Qwen Max (Qwen Coding Plan)">切到 `qwen-max`</button>
-              <button type="button" class="preset-btn" data-preset-model="qwen-plus" data-preset-name="Qwen Plus (Qwen Coding Plan)">切到 `qwen-plus`</button>
+              <button type="button" class="preset-btn" data-preset-model="qwen3-coder-plus" data-preset-name="qwen3-coder-plus (Coding Plan)">切到 `qwen3-coder-plus`</button>
+              <button type="button" class="preset-btn" data-preset-model="qwen3-coder-next" data-preset-name="qwen3-coder-next (Coding Plan)">切到 `qwen3-coder-next`</button>
+              <button type="button" class="preset-btn" data-preset-model="qwen3-max-2026-01-23" data-preset-name="qwen3-max-2026-01-23 (Coding Plan)">切到 `qwen3-max-2026-01-23`</button>
+              <button type="button" class="preset-btn" data-preset-model="glm-4.7" data-preset-name="glm-4.7 (Coding Plan)">切到 `glm-4.7`</button>
+              <button type="button" class="preset-btn" data-preset-model="kimi-k2.5" data-preset-name="kimi-k2.5 (Coding Plan)">切到 `kimi-k2.5`</button>
             </div>
             <label>Model ID<input name="modelId" placeholder="qwen3.5-plus" /></label>
             <label>显示名<input name="modelName" placeholder="Qwen 3.5 Plus (Qwen Coding Plan)" /></label>
@@ -69,6 +90,7 @@
             </details>
             <div class="row">
               <button class="primary" type="submit">保存模型配置</button>
+              <button type="button" id="saveAndTestBtn">保存并测试</button>
               <button type="button" data-action="testModel">测试模型</button>
               <button type="button" data-action="validateConfig">校验配置</button>
             </div>
@@ -136,6 +158,24 @@
           </div>
           <div id="docsList" class="docs-list"></div>
           <div id="practiceList" class="practice-list"></div>
+        </article>
+      </section>
+
+      <section class="grid two-col">
+        <article class="panel">
+          <div class="panel-head">
+            <h2>控制台日志</h2>
+            <span class="panel-tip">最近几行 control-center.log</span>
+          </div>
+          <pre id="controlCenterLog" class="mini-log">等待日志…</pre>
+        </article>
+
+        <article class="panel">
+          <div class="panel-head">
+            <h2>网关守护日志</h2>
+            <span class="panel-tip">最近几行 gateway-supervisor.log</span>
+          </div>
+          <pre id="gatewayLog" class="mini-log">等待日志…</pre>
         </article>
       </section>
 
