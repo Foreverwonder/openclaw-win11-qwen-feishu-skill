@@ -64,10 +64,14 @@ function renderStats(status) {
   const cards = [
     {
       title: "Gateway",
-      value: status.gateway.probe.ok ? "在线" : "离线",
-      className: statusClass(status.gateway.probe.ok, !status.gateway.probe.ok),
+      value: status.gateway.probe.ok ? "在线" : (status.gateway.manuallyStopped ? "已手动停止" : "离线"),
+      className: status.gateway.manuallyStopped
+        ? statusClass(false, true)
+        : statusClass(status.gateway.probe.ok, !status.gateway.probe.ok),
       detail: `URL: ${status.gateway.url}`,
-      note: `${status.gateway.bind || "-"} / ${status.gateway.authMode || "-"}`,
+      note: status.gateway.manuallyStopped
+        ? "你手动停止了网关，后台暂时不会自动拉起。"
+        : `${status.gateway.bind || "-"} / ${status.gateway.authMode || "-"}`,
     },
     {
       title: "默认模型",

@@ -24,6 +24,7 @@ const OPENCLAW_ENTRY = "C:\\Users\\71976\\AppData\\Roaming\\npm\\node_modules\\o
 const EDGE = "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe";
 const DEFAULT_GATEWAY_URL = "http://127.0.0.1:18789/";
 let lastEnsureGatewayAt = 0;
+const MANUAL_GATEWAY_STOP_MS = 12 * 60 * 60 * 1000;
 
 const BASE_ENV = {
   ...process.env,
@@ -100,6 +101,37 @@ function pushModelHistory(entry) {
   ].slice(0, 8);
   writeJson(CONTROL_STATE_PATH, { ...state, modelHistory: next });
   return next;
+}
+
+function getControlState() {
+  return readJson(CONTROL_STATE_PATH, { modelHistory: [] }) || { modelHistory: [] };
+}
+
+function setGatewayManualStop(active) {
+  const state = getControlState();
+  if (active) {
+    state.gatewayManuallyStoppedAt = new Date().toISOString();
+  } else {
+    delete state.gatewayManuallyStoppedAt;
+  }
+  writeJson(CONTROL_STATE_PATH, state);
+}
+
+function getGatewayManualStopState() {
+  const state = getControlState();
+  const stoppedAt = state.gatewayManuallyStoppedAt;
+  if (!stoppedAt) {
+    return { active: false, stoppedAt: null };
+  }
+
+  const ageMs = Date.now() - new Date(stoppedAt).getTime();
+  if (!Number.isFinite(ageMs) || ageMs < 0 || ageMs > MANUAL_GATEWAY_STOP_MS) {
+    delete state.gatewayManuallyStoppedAt;
+    writeJson(CONTROL_STATE_PATH, state);
+    return { active: false, stoppedAt: null };
+  }
+
+  return { active: true, stoppedAt };
 }
 
 async function directModelTest() {
@@ -208,6 +240,7 @@ function httpCheck(targetUrl) {
 }
 
 async function ensureGateway() {
+  setGatewayManualStop(false);
   lastEnsureGatewayAt = Date.now();
   spawn("cmd.exe", ["/c", "start", "", "/min", "cmd", "/c", `"${SUPERVISOR}"`], {
     cwd: PROJECT_DIR,
@@ -253,6 +286,7 @@ async function ensureGateway() {
 }
 
 async function restartGateway() {
+  setGatewayManualStop(false);
   await runPowerShell(
     [
       "$procs = Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*openclaw gateway run*' };",
@@ -262,6 +296,23 @@ async function restartGateway() {
     60000
   );
   return ensureGateway();
+}
+
+async function stopGateway() {
+  setGatewayManualStop(true);
+  await runPowerShell(
+    [
+      "$patterns = @('gateway-supervisor.cmd', 'gateway-start.cmd', 'openclaw\\dist\\index.js\" gateway run', 'openclaw\\dist\\index.js gateway run');",
+      "$procs = Get-CimInstance Win32_Process | Where-Object {",
+      "  $cmd = $_.CommandLine;",
+      "  $cmd -and ($patterns | Where-Object { $cmd -like ('*' + $_ + '*') })",
+      "};",
+      "foreach ($p in $procs) { try { Stop-Process -Id $p.ProcessId -Force -ErrorAction Stop } catch {} }",
+      "Start-Sleep -Seconds 2",
+    ].join(" "),
+    60000
+  );
+  return { ok: true, message: "已停止 gateway 与 supervisor，后续不会自动拉起，直到你手动点击拉起/重启。" };
 }
 
 function extractJson(output) {
@@ -297,9 +348,10 @@ function extractJson(output) {
 
 async function collectStatus() {
   const config = readJson(CONFIG_PATH, {});
-  const state = readJson(CONTROL_STATE_PATH, { modelHistory: [] });
+  const state = getControlState();
+  const manualStop = getGatewayManualStopState();
   const gatewayProbe = await httpCheck(DEFAULT_GATEWAY_URL);
-  if (!gatewayProbe.ok && Date.now() - lastEnsureGatewayAt > 20000) {
+  if (!gatewayProbe.ok && !manualStop.active && Date.now() - lastEnsureGatewayAt > 20000) {
     ensureGateway().catch(() => {});
   }
   const tokenArg = config?.gateway?.auth?.token ? ` --token ${config.gateway.auth.token}` : "";
@@ -335,6 +387,8 @@ async function collectStatus() {
       url: DEFAULT_GATEWAY_URL,
       dashboardUrl,
       probe: gatewayProbe,
+      manuallyStopped: manualStop.active,
+      manuallyStoppedAt: manualStop.stoppedAt,
       mode: config?.gateway?.mode || null,
       bind: config?.gateway?.bind || null,
       authMode: config?.gateway?.auth?.mode || null,
@@ -475,7 +529,10 @@ async function performAction(action, payload = {}) {
       return ensureGateway();
     case "restartGateway":
       return restartGateway();
+    case "stopGateway":
+      return stopGateway();
     case "openDashboard":
+      setGatewayManualStop(false);
       spawn("cmd.exe", ["/c", "start", "", `"${DASHBOARD_LAUNCHER}"`], {
         cwd: PROJECT_DIR,
         env: BASE_ENV,

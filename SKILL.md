@@ -99,6 +99,10 @@ Get-NetTCPConnection -LocalPort 18789,18809 -State Listen -ErrorAction SilentlyC
   - only start a new `server.js` when `18809` is unhealthy
   - never stack multiple `gateway-supervisor.cmd` instances on repeated launches
   - support `OPENCLAW_NO_BROWSER=1` for non-interactive verification
+- Manual stop behavior matters on this machine:
+  - if the user manually stops gateway, do not auto-heal it immediately
+  - preserve a manual-stop marker so background refresh does not restart `18789`
+  - clear that marker only when the user explicitly chooses `拉起网关` or `重启网关`
 - Do not trust browser-cached JS/CSS when a UI fix is claimed to be deployed; always verify the served page reflects the new controls.
 
 ## Qwen Coding Plan Rules
@@ -271,6 +275,7 @@ Expected results:
 - repeated launcher clicks keep `18809` reachable
 - repeated launcher clicks do not accumulate multiple `server.js` processes
 - repeated launcher clicks do not accumulate multiple `gateway-supervisor.cmd` processes
+- after an explicit manual stop, `18789` stays down while `18809` remains up
 
 ## Recovery Order
 
