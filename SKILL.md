@@ -1,9 +1,9 @@
 ---
 name: openclaw-win11-qwen-feishu
-description: Configure, repair, or verify OpenClaw on native Windows 11 when using Qwen Coding Plan through DashScope, Feishu integration, local dashboard access, and proxy or TUN software such as v2rayN or sing-box. Use for Win11-native OpenClaw installs, dashboard refused-connection issues, Qwen model wiring, Feishu channel setup, or when the gateway becomes unreliable under Scheduled Tasks.
+description: Maintain OpenClaw on native Windows 11 with a MiniMax baseline, Qwen Coding Plan backup provider, Feishu integration, local dashboard access, and proxy or TUN software such as v2rayN or sing-box.
 ---
 
-# OpenClaw Win11 Qwen Feishu
+# OpenClaw Win11 Maintenance
 
 Use this skill for the validated Win11-native setup that was made to work on this machine.
 
@@ -11,9 +11,11 @@ Use this skill for the validated Win11-native setup that was made to work on thi
 
 1. Confirm the environment before changing anything.
 2. Prefer the stable local dashboard flow over the original Scheduled Task flow.
-3. Configure Qwen Coding Plan as an OpenAI-compatible custom provider, not as Anthropic-compatible.
-4. Verify Feishu separately from model setup.
-5. End with concrete runtime checks, not config-only checks.
+3. Keep secrets in SecretRef form and audit them before runtime testing.
+4. Treat `minimax/MiniMax-M2.1` as the current default baseline unless the user explicitly asks to switch back.
+5. Keep Qwen Coding Plan configured as an OpenAI-compatible backup provider, not as Anthropic-compatible.
+6. Verify Feishu separately from model setup.
+7. End with concrete runtime checks, not config-only checks.
 
 ## Machine-Specific Paths
 
@@ -28,6 +30,12 @@ Use this skill for the validated Win11-native setup that was made to work on thi
 - Gateway supervisor: `C:\Users\71976\.openclaw\gateway-supervisor.cmd`
 - Startup watchdog: `C:\Users\71976\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup\OpenClaw Gateway Watchdog.vbs`
 - v2rayN root: `C:\Users\71976\Desktop\v2rayN-windows-64-desktop\v2rayN-windows-64`
+
+## Current Baseline
+
+- As of `2026-03-22`, the default agent model on this machine is `minimax/MiniMax-M2.1`.
+- Treat that MiniMax baseline as temporary and re-evaluate it by `2026-04-05`.
+- Keep `qwen-coding-plan/kimi-k2.5` configured and directly probeable as the backup provider.
 
 ## Dashboard Stability Rules
 
@@ -64,11 +72,13 @@ Get-NetTCPConnection -LocalPort 18789,18809 -State Listen -ErrorAction SilentlyC
 - This machine has shown several Win11-specific startup failures:
   - `node` missing from the environment under some launcher paths
   - the supervisor starting without the correct `OPENCLAW_CONFIG_PATH`
+- SecretRefs failing to resolve because user environment variables were not imported into launcher processes
   - the browser opening before `18789` is actually ready
 - Keep the startup chain simple and explicit:
   - `gateway-start.cmd` must set `OPENCLAW_CONFIG_PATH`
   - `gateway-start.cmd` must set `OPENCLAW_STATE_DIR`
   - `gateway-start.cmd` must use the absolute `node.exe` path
+  - launchers must import the required user environment variables from `HKCU\Environment` before calling `openclaw`
   - launchers should wait for `http://127.0.0.1:18789/` to return `200` before opening browser UI
 - Prefer these file roles:
   - `gateway-start.cmd`: single source of truth for starting the gateway
@@ -99,19 +109,47 @@ Get-NetTCPConnection -LocalPort 18789,18809 -State Listen -ErrorAction SilentlyC
   - only start a new `server.js` when `18809` is unhealthy
   - never stack multiple `gateway-supervisor.cmd` instances on repeated launches
   - support `OPENCLAW_NO_BROWSER=1` for non-interactive verification
+  - resolve the dashboard URL via `openclaw dashboard --no-open`, not by assuming `gateway.auth.token` is plaintext in config
 - Manual stop behavior matters on this machine:
   - if the user manually stops gateway, do not auto-heal it immediately
   - preserve a manual-stop marker so background refresh does not restart `18789`
   - clear that marker only when the user explicitly chooses `拉起网关` or `重启网关`
 - Do not trust browser-cached JS/CSS when a UI fix is claimed to be deployed; always verify the served page reflects the new controls.
 
+## Secrets and Hardening Rules
+
+- Use SecretRef objects with the default env provider for all local secrets.
+- On this machine, persist the required secrets in `HKCU\Environment`, not in `openclaw.json`, `auth-profiles.json`, `models.json`, or `~\.openclaw\.env`.
+- The required environment variable names are:
+  - `MINIMAX_API_KEY`
+  - `OPENAI_API_KEY`
+  - `OPENCLAW_FEISHU_APP_SECRET`
+  - `OPENCLAW_GATEWAY_TOKEN`
+- Do not leave plaintext secrets in:
+  - `C:\Users\71976\.openclaw\openclaw.json`
+  - `C:\Users\71976\.openclaw\agents\main\agent\auth-profiles.json`
+  - `C:\Users\71976\.openclaw\agents\main\agent\models.json`
+- Keep `secrets.providers.default.source=env`.
+- Keep `tools.profile=coding` at the root and `agents.list.main.tools.profile=coding`.
+- Do not add `agents.defaults.tools` on OpenClaw `2026.3.13`; this build rejects that key.
+- Keep `plugins.allow` explicit and limited to trusted plugin ids.
+- Keep `channels.feishu.tools.doc=false` unless the user explicitly needs Feishu doc creation from agent turns.
+- Keep `gateway.trustedProxies` set to loopback addresses on this local-only machine: `127.0.0.1` and `::1`.
+- After any secret or tool-surface change, run:
+
+```powershell
+openclaw secrets audit --check
+openclaw security audit
+```
+
 ## Qwen Coding Plan Rules
 
 - Do not wire Qwen Coding Plan through Anthropic-compatible settings for OpenClaw.
 - Configure it as a custom OpenAI-compatible provider that points to `https://coding.dashscope.aliyuncs.com/v1`.
 - Use a custom provider id `qwen-coding-plan`.
-- Use default model `qwen-coding-plan/qwen3.5-plus`.
-- Store the API key in `env.QWEN_CODING_PLAN_API_KEY`.
+- Keep it as a backup provider while `minimax/MiniMax-M2.1` remains the baseline on this machine.
+- On this machine, store the backup provider API key in SecretRef form pointing to `OPENAI_API_KEY`.
+- Reason: in OpenClaw `2026.3.13`, `models.json` secret-marker audit only recognizes standard env marker names for OpenAI-compatible providers; `OPENAI_API_KEY` keeps `openclaw secrets audit --check` clean.
 - For this machine, direct model verification against the DashScope endpoint is more trustworthy than relying on a reused OpenClaw session test.
 
 Supported model ids validated from official Qwen Code docs and local testing:
@@ -128,35 +166,36 @@ Important naming rule:
 - `kimi-k2.5` is valid
 - `kimi k2.5` is invalid
 
-The validated `openclaw.json` shape is:
+The validated backup-provider shape in `openclaw.json` is:
 
 ```json
 {
-  "env": {
-    "QWEN_CODING_PLAN_API_KEY": "..."
+  "secrets": {
+    "providers": {
+      "default": {
+        "source": "env"
+      }
+    }
   },
   "models": {
     "mode": "merge",
     "providers": {
       "qwen-coding-plan": {
         "baseUrl": "https://coding.dashscope.aliyuncs.com/v1",
-        "apiKey": "${QWEN_CODING_PLAN_API_KEY}",
+        "apiKey": {
+          "source": "env",
+          "provider": "default",
+          "id": "OPENAI_API_KEY"
+        },
         "api": "openai-completions",
         "models": [
           {
-            "id": "qwen3.5-plus",
-            "name": "Qwen 3.5 Plus (Qwen Coding Plan)",
+            "id": "kimi-k2.5",
+            "name": "kimi-k2.5 (Coding Plan)",
             "reasoning": true,
             "input": ["text"]
           }
         ]
-      }
-    }
-  },
-  "agents": {
-    "defaults": {
-      "model": {
-        "primary": "qwen-coding-plan/qwen3.5-plus"
       }
     }
   }
@@ -238,16 +277,24 @@ Run all of these before declaring success:
 ```powershell
 openclaw config validate
 openclaw models status --plain
+openclaw models status --probe --probe-provider qwen-coding-plan --probe-timeout 15000 --probe-max-tokens 16
 openclaw channels status
+openclaw channels status --probe
+openclaw secrets audit --check
+openclaw security audit
 openclaw dashboard --no-open
 openclaw agent --agent main --message "Reply with OK only." --json --timeout 120
 ```
 
 Expected results:
 
-- `openclaw models status --plain` shows `qwen-coding-plan/qwen3.5-plus`
+- `openclaw models status --plain` shows `minimax/MiniMax-M2.1`
+- `openclaw models status --probe --probe-provider qwen-coding-plan ...` reports `ok`
+- `openclaw channels status --probe` reports Feishu `works`
+- `openclaw secrets audit --check` exits clean
 - `openclaw dashboard --no-open` prints a `127.0.0.1:18789` URL
 - the agent test returns payload text `OK`
+- `openclaw security audit` may still fail in local CLI mode on `2026.3.13` because the Feishu plugin attempts direct SecretRef resolution before consuming the gateway runtime snapshot; treat that as a version-specific CLI bug, not a broken gateway, when `channels status --probe` still reports `works`.
 
 For this machine, also verify the direct provider path:
 
@@ -273,7 +320,7 @@ Expected results:
 
 - cold start reaches `http://127.0.0.1:18809/`
 - repeated launcher clicks keep `18809` reachable
-- repeated launcher clicks do not accumulate multiple `server.js` processes
+- repeated launcher clicks do not accumulate multiple `18809` owner processes
 - repeated launcher clicks do not accumulate multiple `gateway-supervisor.cmd` processes
 - after an explicit manual stop, `18789` stays down while `18809` remains up
 

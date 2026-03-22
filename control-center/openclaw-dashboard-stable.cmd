@@ -2,6 +2,10 @@
 setlocal
 
 set "PATH=C:\Users\71976\.local\bin;C:\Users\71976\AppData\Roaming\npm;C:\Program Files\nodejs;%PATH%"
+call :load_user_env MINIMAX_API_KEY
+call :load_user_env OPENAI_API_KEY
+call :load_user_env OPENCLAW_FEISHU_APP_SECRET
+call :load_user_env OPENCLAW_GATEWAY_TOKEN
 set "EDGE=C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
 set "SUPERVISOR=C:\Users\71976\.openclaw\gateway-supervisor.cmd"
 set "GATEWAY_START=C:\Users\71976\.openclaw\gateway-start.cmd"
@@ -33,3 +37,8 @@ if exist "%EDGE%" (
 ) else (
   start "" "%URL%"
 )
+exit /b 0
+
+:load_user_env
+for /f "skip=2 tokens=1,2,*" %%A in ('reg query HKCU\Environment /v %~1 2^>nul') do if /I "%%A"=="%~1" set "%~1=%%C"
+exit /b 0

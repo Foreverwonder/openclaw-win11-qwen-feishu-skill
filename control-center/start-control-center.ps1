@@ -16,12 +16,32 @@ $env:no_proxy = "localhost,127.0.0.1,::1"
 $env:OPENCLAW_CONFIG_PATH = "C:\Users\71976\.openclaw\openclaw.json"
 $env:OPENCLAW_STATE_DIR = "C:\Users\71976\.openclaw"
 
+function Import-UserEnvironmentVariable {
+  param(
+    [string]$Name
+  )
+
+  $value = [Environment]::GetEnvironmentVariable($Name, "User")
+  if (-not [string]::IsNullOrWhiteSpace($value)) {
+    Set-Item -Path ("Env:" + $Name) -Value $value
+  }
+}
+
+foreach ($secretName in @(
+  "MINIMAX_API_KEY",
+  "OPENAI_API_KEY",
+  "OPENCLAW_FEISHU_APP_SECRET",
+  "OPENCLAW_GATEWAY_TOKEN"
+)) {
+  Import-UserEnvironmentVariable -Name $secretName
+}
+
 function Get-DashboardUrl {
   try {
-    $config = Get-Content -Raw $ConfigPath | ConvertFrom-Json
-    $token = $config.gateway.auth.token
-    if ($token) {
-      return "http://127.0.0.1:18789/#token=$token"
+    $output = & openclaw dashboard --no-open 2>&1
+    $line = ($output | Select-String "Dashboard URL:" | Select-Object -Last 1).Line
+    if ($line) {
+      return ($line -replace "^.*Dashboard URL:\s*", "").Trim()
     }
   } catch {
   }

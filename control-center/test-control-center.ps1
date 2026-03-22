@@ -4,9 +4,35 @@ $launcher = "D:\AI_Projects\openclaw\openclaw-control-center.cmd"
 $serverJs = "D:\AI_Projects\openclaw\control-center\server.js"
 $url = "http://127.0.0.1:18809/"
 
+function Get-ListeningPids {
+  param(
+    [int]$Port
+  )
+
+  @(
+    Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue |
+      Select-Object -ExpandProperty OwningProcess -Unique
+  )
+}
+
 function Get-ControlCenterProcesses {
-  Get-CimInstance Win32_Process |
-    Where-Object { $_.CommandLine -like "*control-center\server.js*" }
+  $all = @(Get-CimInstance Win32_Process)
+  $byId = @{}
+
+  foreach ($proc in $all | Where-Object { $_.CommandLine -like "*control-center\server.js*" }) {
+    $byId[$proc.ProcessId] = $proc
+  }
+
+  foreach ($ownerPid in Get-ListeningPids -Port 18809) {
+    if (-not $byId.ContainsKey($ownerPid)) {
+      $proc = $all | Where-Object { $_.ProcessId -eq $ownerPid } | Select-Object -First 1
+      if ($proc) {
+        $byId[$ownerPid] = $proc
+      }
+    }
+  }
+
+  @($byId.GetEnumerator() | Sort-Object Name | ForEach-Object { $_.Value })
 }
 
 function Get-SupervisorProcesses {
@@ -61,6 +87,25 @@ function Wait-Http200 {
   return $false
 }
 
+function Wait-ProcessCount {
+  param(
+    [scriptblock]$Getter,
+    [int]$ExpectedCount,
+    [int]$TimeoutSeconds = 10
+  )
+
+  $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+  do {
+    $items = @(& $Getter)
+    if ($items.Count -eq $ExpectedCount) {
+      return @($items)
+    }
+    Start-Sleep -Milliseconds 700
+  } while ((Get-Date) -lt $deadline)
+
+  return @(& $Getter)
+}
+
 function Assert-True {
   param(
     [bool]$Condition,
@@ -83,9 +128,9 @@ Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "`"$launcher`"" -WindowSty
 $coldStartOk = Wait-Http200 -TargetUrl $url -TimeoutSeconds 20
 Assert-True $coldStartOk "Cold start failed: control center did not respond with HTTP 200 on 18809."
 
-$firstProcs = @(Get-ControlCenterProcesses)
+$firstProcs = @(Wait-ProcessCount -Getter { Get-ControlCenterProcesses } -ExpectedCount 1)
 Assert-True ($firstProcs.Count -eq 1) "Expected exactly 1 control-center process after cold start, got $($firstProcs.Count)."
-$firstSupervisors = @(Get-SupervisorProcesses)
+$firstSupervisors = @(Wait-ProcessCount -Getter { Get-SupervisorProcesses } -ExpectedCount 1)
 Assert-True ($firstSupervisors.Count -eq 1) "Expected exactly 1 gateway supervisor after cold start, got $($firstSupervisors.Count)."
 
 Write-Host "== Repeat click launch =="
@@ -94,9 +139,9 @@ Start-Sleep -Seconds 4
 $repeatOk = Wait-Http200 -TargetUrl $url -TimeoutSeconds 10
 Assert-True $repeatOk "Second launch failed: control center did not stay reachable on 18809."
 
-$secondProcs = @(Get-ControlCenterProcesses)
+$secondProcs = @(Wait-ProcessCount -Getter { Get-ControlCenterProcesses } -ExpectedCount 1)
 Assert-True ($secondProcs.Count -eq 1) "Expected exactly 1 control-center process after repeated launch, got $($secondProcs.Count)."
-$secondSupervisors = @(Get-SupervisorProcesses)
+$secondSupervisors = @(Wait-ProcessCount -Getter { Get-SupervisorProcesses } -ExpectedCount 1)
 Assert-True ($secondSupervisors.Count -eq 1) "Expected exactly 1 gateway supervisor after repeated launch, got $($secondSupervisors.Count)."
 
 Write-Host ""
