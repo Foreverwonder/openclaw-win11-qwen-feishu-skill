@@ -12,7 +12,7 @@ Use this skill for the validated Win11-native setup that was made to work on thi
 1. Confirm the environment before changing anything.
 2. Prefer the stable local dashboard flow over the original Scheduled Task flow.
 3. Keep secrets in SecretRef form and audit them before runtime testing.
-4. Treat `minimax/MiniMax-M2.1` as the current default baseline unless the user explicitly asks to switch back.
+4. Treat `minimax/MiniMax-M2.7-highspeed` via the third-party Anthropic-compatible endpoint as the current default baseline unless the user explicitly asks to switch back.
 5. Keep Qwen Coding Plan configured as an OpenAI-compatible backup provider, not as Anthropic-compatible.
 6. Verify Feishu separately from model setup.
 7. End with concrete runtime checks, not config-only checks.
@@ -33,8 +33,9 @@ Use this skill for the validated Win11-native setup that was made to work on thi
 
 ## Current Baseline
 
-- As of `2026-03-22`, the default agent model on this machine is `minimax/MiniMax-M2.1`.
-- Treat that MiniMax baseline as temporary and re-evaluate it by `2026-04-05`.
+- As of `2026-03-24`, the default agent model on this machine is `minimax/MiniMax-M2.7-highspeed`.
+- The validated provider base URL is `https://v2.aicodee.com`.
+- Treat that MiniMax baseline as temporary and re-evaluate it by `2026-04-10`.
 - Keep `qwen-coding-plan/kimi-k2.5` configured and directly probeable as the backup provider.
 
 ## Dashboard Stability Rules
@@ -122,6 +123,8 @@ Get-NetTCPConnection -LocalPort 18789,18809 -State Listen -ErrorAction SilentlyC
 - On this machine, persist the required secrets in `HKCU\Environment`, not in `openclaw.json`, `auth-profiles.json`, `models.json`, or `~\.openclaw\.env`.
 - The required environment variable names are:
   - `MINIMAX_API_KEY`
+  - `ANTHROPIC_AUTH_TOKEN`
+  - `ANTHROPIC_BASE_URL`
   - `OPENAI_API_KEY`
   - `OPENCLAW_FEISHU_APP_SECRET`
   - `OPENCLAW_GATEWAY_TOKEN`
@@ -140,6 +143,70 @@ Get-NetTCPConnection -LocalPort 18789,18809 -State Listen -ErrorAction SilentlyC
 ```powershell
 openclaw secrets audit --check
 openclaw security audit
+```
+
+## Third-Party MiniMax Rules
+
+- For the current working MiniMax setup on this machine, do not use the old direct MiniMax portal path as the primary provider.
+- Use a custom provider id `minimax` with:
+  - `api = anthropic-messages`
+  - `auth = api-key`
+  - `baseUrl = https://v2.aicodee.com`
+  - `apiKey = SecretRef(env:default:MINIMAX_API_KEY)`
+  - `headers.x-api-key = SecretRef(env:default:MINIMAX_API_KEY)`
+- Keep `ANTHROPIC_AUTH_TOKEN` mirrored to the same user secret as a compatibility helper for direct endpoint probes and control-center diagnostics.
+- Keep `models.providers.minimax.models[0].id = MiniMax-M2.7-highspeed`.
+- Keep `agents.defaults.model.primary` and `agents.list.main.model` identical.
+- Keep `C:\Users\71976\.openclaw\agents\main\agent\models.json` aligned with `openclaw.json`; this file is part of the live auth/model resolution path on this machine.
+
+The validated provider shape in `openclaw.json` is:
+
+```json
+{
+  "models": {
+    "mode": "merge",
+    "providers": {
+      "minimax": {
+        "api": "anthropic-messages",
+        "apiKey": {
+          "source": "env",
+          "provider": "default",
+          "id": "MINIMAX_API_KEY"
+        },
+        "auth": "api-key",
+        "baseUrl": "https://v2.aicodee.com",
+        "headers": {
+          "x-api-key": {
+            "source": "env",
+            "provider": "default",
+            "id": "MINIMAX_API_KEY"
+          }
+        },
+        "models": [
+          {
+            "id": "MiniMax-M2.7-highspeed",
+            "name": "MiniMax M2.7 Highspeed",
+            "reasoning": true,
+            "input": ["text"]
+          }
+        ]
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": {
+        "primary": "minimax/MiniMax-M2.7-highspeed"
+      }
+    },
+    "list": [
+      {
+        "id": "main",
+        "model": "minimax/MiniMax-M2.7-highspeed"
+      }
+    ]
+  }
+}
 ```
 
 ## Qwen Coding Plan Rules
@@ -205,9 +272,24 @@ The validated backup-provider shape in `openclaw.json` is:
 ## Model Switching Rules
 
 - In the control center, model switching should favor preset buttons and a short form, not full raw config editing.
-- After switching models, verify with a direct HTTP test to the provider endpoint rather than a session-bound agent test.
-- A stale OpenClaw session can keep using an older model even after config changes.
-- If a direct test succeeds but an agent turn still reports the old model, treat that as session/runtime state drift, not provider failure.
+- After switching models, verify in this order:
+  - config write result
+  - control-center direct provider test
+  - fresh process runtime state
+  - fresh local agent run
+- A stale OpenClaw session or stale `server.js` process can keep using an older model even after config changes.
+- If a direct test succeeds but an agent turn still reports the old model, treat that as runtime state drift until proven otherwise.
+- Do not trust only `agents.defaults.model.primary`; also check `agents.list.main.model`.
+- Do not trust only `openclaw.json`; also check `C:\Users\71976\.openclaw\agents\main\agent\models.json`.
+- Do not trust only the control-center page; verify the actual owner process and creation time on `18809`.
+
+Common false-success patterns on this machine:
+
+- The UI writes `agents.defaults.model.primary` but leaves `agents.list.main.model` unchanged.
+- `openclaw.json` is updated but `agents\main\agent\models.json` still points to an old provider secret or old model.
+- `18809` is still owned by an old `node.exe` process, so the new `server.js` code is not actually live.
+- A third-party provider direct HTTP probe works, but the live agent still fails because the launcher process did not import the updated user environment variables.
+- The control-center `testModel` API can look healthy while hitting the wrong endpoint if the old backend process is still serving.
 
 Direct verification shape:
 
@@ -222,6 +304,27 @@ $body = @{
 Invoke-RestMethod -Method Post `
   -Uri "https://coding.dashscope.aliyuncs.com/v1/chat/completions" `
   -Headers @{ Authorization = "Bearer <QWEN_CODING_PLAN_API_KEY>" } `
+  -ContentType "application/json" `
+  -Body $body
+```
+
+Direct MiniMax verification shape:
+
+```powershell
+$body = @{
+  model = "MiniMax-M2.7-highspeed"
+  messages = @(@{ role = "user"; content = "Reply with OK only." })
+  max_tokens = 128
+  temperature = 0
+} | ConvertTo-Json -Depth 6
+
+Invoke-WebRequest -Method Post `
+  -Uri "https://v2.aicodee.com/v1/messages" `
+  -Headers @{
+    Authorization = "Bearer <ANTHROPIC_AUTH_TOKEN>"
+    "x-api-key" = "<ANTHROPIC_AUTH_TOKEN>"
+    "anthropic-version" = "2023-06-01"
+  } `
   -ContentType "application/json" `
   -Body $body
 ```
@@ -277,7 +380,6 @@ Run all of these before declaring success:
 ```powershell
 openclaw config validate
 openclaw models status --plain
-openclaw models status --probe --probe-provider qwen-coding-plan --probe-timeout 15000 --probe-max-tokens 16
 openclaw channels status
 openclaw channels status --probe
 openclaw secrets audit --check
@@ -288,8 +390,7 @@ openclaw agent --agent main --message "Reply with OK only." --json --timeout 120
 
 Expected results:
 
-- `openclaw models status --plain` shows `minimax/MiniMax-M2.1`
-- `openclaw models status --probe --probe-provider qwen-coding-plan ...` reports `ok`
+- `openclaw models status --plain` shows `minimax/MiniMax-M2.7-highspeed`
 - `openclaw channels status --probe` reports Feishu `works`
 - `openclaw secrets audit --check` exits clean
 - `openclaw dashboard --no-open` prints a `127.0.0.1:18789` URL
@@ -307,8 +408,28 @@ Expected results:
 
 - both endpoints return `200`
 - `18809` being healthy is not enough; `18789` must be healthy too
-- when validating a newly switched model, prefer a direct `/v1/chat/completions` test
-- if the direct test works and agent sessions do not, do not misdiagnose the provider
+- when validating a newly switched model, prefer a direct provider endpoint test plus a fresh local agent run
+- if the direct test works and agent sessions do not, do not misdiagnose the provider until stale processes and env import are ruled out
+- when checking `18809`, verify the owning process and its creation time to avoid talking to an old backend
+- when checking the control center's `testModel`, confirm the returned endpoint matches the intended provider path
+
+For the current MiniMax baseline, the minimum required success proof is:
+
+```powershell
+$body = @{ action = "testModel" } | ConvertTo-Json
+Invoke-WebRequest http://127.0.0.1:18809/api/action -Method Post -ContentType "application/json" -Body $body -UseBasicParsing
+
+$env:MINIMAX_API_KEY = [Environment]::GetEnvironmentVariable("MINIMAX_API_KEY", "User")
+$env:ANTHROPIC_AUTH_TOKEN = [Environment]::GetEnvironmentVariable("ANTHROPIC_AUTH_TOKEN", "User")
+& "C:\Program Files\nodejs\node.exe" "C:\Users\71976\AppData\Roaming\npm\node_modules\openclaw\dist\index.js" agent --local --agent main --message "Reply with OK only." --json
+```
+
+Expected results:
+
+- `testModel` returns endpoint `https://v2.aicodee.com/v1/messages`
+- `testModel` returns content `OK`
+- the fresh local agent run returns payload text `OK`
+- the fresh local agent run reports provider `minimax` and model `MiniMax-M2.7-highspeed`
 
 For the control center, also run the local regression script:
 
