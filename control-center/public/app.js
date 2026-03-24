@@ -71,7 +71,9 @@ function renderStats(status) {
       detail: `URL: ${status.gateway.url}`,
       note: status.gateway.manuallyStopped
         ? "你手动停止了网关，后台暂时不会自动拉起。"
-        : `${status.gateway.bind || "-"} / ${status.gateway.authMode || "-"}`,
+        : (status.controlUi?.selfHealApplied
+          ? `已自动修复 Control UI origins`
+          : `${status.gateway.bind || "-"} / ${status.gateway.authMode || "-"}`),
     },
     {
       title: "默认模型",
@@ -240,6 +242,7 @@ async function refresh() {
   setOutput("状态已刷新", {
     generatedAt: status.generatedAt,
     gateway: status.gateway.probe,
+    controlUi: status.controlUi,
     model: status.modelConfig.primary,
     skills: (status.raw.skills.data?.skills || []).length,
     feishu: status.raw.channels.data?.channels?.feishu || null,

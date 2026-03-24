@@ -13,7 +13,7 @@ $GatewayStart = "C:\Users\71976\.openclaw\gateway-start.cmd"
 $env:Path = "C:\Users\71976\.local\bin;C:\Users\71976\AppData\Roaming\npm;C:\Program Files\nodejs;$env:Path"
 $env:NO_PROXY = "localhost,127.0.0.1,::1"
 $env:no_proxy = "localhost,127.0.0.1,::1"
-$env:OPENCLAW_CONFIG_PATH = "C:\Users\71976\.openclaw\openclaw.json"
+$env:OPENCLAW_CONFIG_PATH = $ConfigPath
 $env:OPENCLAW_STATE_DIR = "C:\Users\71976\.openclaw"
 
 function Import-UserEnvironmentVariable {
@@ -28,6 +28,7 @@ function Import-UserEnvironmentVariable {
 }
 
 foreach ($secretName in @(
+  "ANTHROPIC_AUTH_TOKEN",
   "MINIMAX_API_KEY",
   "OPENAI_API_KEY",
   "OPENCLAW_FEISHU_APP_SECRET",
@@ -127,16 +128,32 @@ Start-ControlCenterIfNeeded
 
 if ($env:OPENCLAW_NO_BROWSER -ne "1") {
   $dashboardUrl = Get-DashboardUrl
+
+  # Check whether the Control Center is already open in Edge.
+  $existingTab = Get-Process -Name "msedge" -ErrorAction SilentlyContinue | Where-Object {
+    $_.MainWindowTitle -like "*Control Center*" -or $_.MainWindowTitle -like "*OpenClaw*"
+  }
+
+  if (-not $existingTab) {
+    if (Test-Path $Edge) {
+      Start-Process -FilePath $Edge -ArgumentList @(
+        "--new-tab",
+        '--proxy-server=direct://',
+        '--proxy-bypass-list=<-loopback>;127.0.0.1;localhost;::1',
+        $Url
+      ) -ErrorAction SilentlyContinue | Out-Null
+    } else {
+      Start-Process -FilePath $Url -ErrorAction SilentlyContinue | Out-Null
+    }
+  }
+
+  # Open the dashboard in a separate tab.
   if (Test-Path $Edge) {
     Start-Process -FilePath $Edge -ArgumentList @(
       "--new-tab",
-      '--proxy-server=direct://',
-      '--proxy-bypass-list=<-loopback>;127.0.0.1;localhost;::1',
-      $Url,
       $dashboardUrl
-    ) | Out-Null
+    ) -ErrorAction SilentlyContinue | Out-Null
   } else {
-    Start-Process -FilePath $Url | Out-Null
-    Start-Process -FilePath $dashboardUrl | Out-Null
+    Start-Process -FilePath $dashboardUrl -ErrorAction SilentlyContinue | Out-Null
   }
 }

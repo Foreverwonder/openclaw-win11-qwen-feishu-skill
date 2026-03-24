@@ -2,7 +2,7 @@
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
-const { execFile, spawn } = require("child_process");
+const { spawn } = require("child_process");
 
 const HOST = "127.0.0.1";
 const PORT = 18809;
@@ -23,6 +23,46 @@ const NODE_EXE = "C:\\Program Files\\nodejs\\node.exe";
 const OPENCLAW_ENTRY = "C:\\Users\\71976\\AppData\\Roaming\\npm\\node_modules\\openclaw\\dist\\index.js";
 const EDGE = "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe";
 const DEFAULT_GATEWAY_URL = "http://127.0.0.1:18789/";
+const REQUIRED_CONTROL_UI_ORIGINS = [
+  "http://127.0.0.1:18789",
+  "http://localhost:18789",
+  "http://127.0.0.1:18809",
+  "http://localhost:18809",
+];
+
+// Rate limiting: simple in-memory rate limiter for API endpoints
+const rateLimiter = (() => {
+  const windowMs = 60 * 1000; // 1 minute window
+  const maxRequests = 60; // max 60 requests per window
+  const requests = new Map();
+  return (req) => {
+    const now = Date.now();
+    const key = req.socket.remoteAddress || "unknown";
+    const window = requests.get(key) || [];
+    const validWindow = window.filter((t) => now - t < windowMs);
+    if (validWindow.length >= maxRequests) {
+      return false;
+    }
+    validWindow.push(now);
+    requests.set(key, validWindow);
+    return true;
+  };
+})();
+
+// API authentication: validate token for sensitive endpoints
+let gatewayToken = "";
+function validateAuth(req) {
+  // For now, validate against the gateway token if set
+  if (!gatewayToken) return true; // No token configured, allow all
+  const authHeader = req.headers["authorization"];
+  const queryToken = new URL(req.url, "http://localhost").searchParams.get("token");
+  const providedToken = authHeader?.replace(/^Bearer\s+/i, "") || queryToken || "";
+  return providedToken === gatewayToken;
+}
+
+function setGatewayToken(token) {
+  gatewayToken = token || "";
+}
 let lastEnsureGatewayAt = 0;
 const MANUAL_GATEWAY_STOP_MS = 12 * 60 * 60 * 1000;
 
@@ -67,11 +107,143 @@ function maskSecret(value) {
   return `${value.slice(0, 6)}...${value.slice(-4)}`;
 }
 
+function maskSecretLike(value) {
+  if (!value) return "";
+  if (typeof value === "string") {
+    return maskSecret(value);
+  }
+  if (typeof value === "object") {
+    const source = value.source || "?";
+    const provider = value.provider || "default";
+    const id = value.id || "unknown";
+    return `SecretRef(${source}:${provider}:${id})`;
+  }
+  return "";
+}
+
+function getEnvSecretRef(id) {
+  return {
+    source: "env",
+    provider: "default",
+    id,
+  };
+}
+
+function readUserEnvVar(name) {
+  return process.env[name]
+    || process.env[name.toUpperCase()]
+    || process.env[name.toLowerCase()]
+    || "";
+}
+
+function resolveProviderApiKey(provider, fallbackEnvNames = []) {
+  if (typeof provider?.apiKey === "string") {
+    const placeholderMatch = provider.apiKey.match(/^\$\{([A-Z0-9_]+)\}$/);
+    if (placeholderMatch) {
+      return readUserEnvVar(placeholderMatch[1]);
+    }
+    return provider.apiKey;
+  }
+
+  if (typeof provider?.apiKey === "object" && provider.apiKey?.id) {
+    return readUserEnvVar(provider.apiKey.id);
+  }
+
+  for (const name of fallbackEnvNames) {
+    const value = readUserEnvVar(name);
+    if (value) {
+      return value;
+    }
+  }
+
+  return "";
+}
+
+function normalizeOriginList(values) {
+  return [...new Set(
+    (Array.isArray(values) ? values : [])
+      .filter((value) => typeof value === "string")
+      .map((value) => value.trim())
+      .filter(Boolean)
+  )];
+}
+
+function ensureControlUiOrigins(config) {
+  const currentOrigins = normalizeOriginList(config?.gateway?.controlUi?.allowedOrigins);
+  const missingOrigins = REQUIRED_CONTROL_UI_ORIGINS.filter((origin) => !currentOrigins.includes(origin));
+
+  if (missingOrigins.length === 0) {
+    return {
+      changed: false,
+      origins: currentOrigins,
+      missingOrigins: [],
+    };
+  }
+
+  config.gateway = config.gateway || {};
+  config.gateway.controlUi = config.gateway.controlUi || {};
+  config.gateway.controlUi.allowedOrigins = [...currentOrigins, ...missingOrigins];
+  writeJson(CONFIG_PATH, config);
+
+  return {
+    changed: true,
+    origins: config.gateway.controlUi.allowedOrigins,
+    missingOrigins,
+  };
+}
+
+function ensureMainAgentModelSync(config) {
+  const primary = config?.agents?.defaults?.model?.primary;
+  if (!primary) {
+    return { changed: false, primary: null };
+  }
+
+  config.agents = config.agents || {};
+  config.agents.list = Array.isArray(config.agents.list) ? config.agents.list : [];
+  const mainIndex = config.agents.list.findIndex((agent) => agent && agent.id === "main");
+
+  if (mainIndex >= 0) {
+    if (config.agents.list[mainIndex]?.model === primary) {
+      return { changed: false, primary };
+    }
+    config.agents.list[mainIndex] = {
+      ...config.agents.list[mainIndex],
+      model: primary,
+    };
+    writeJson(CONFIG_PATH, config);
+    return { changed: true, primary };
+  }
+
+  config.agents.list.push({
+    id: "main",
+    model: primary,
+    tools: {
+      profile: "coding",
+    },
+  });
+  writeJson(CONFIG_PATH, config);
+  return { changed: true, primary };
+}
+
 function tailFile(filePath, maxLines = 40) {
   if (!fs.existsSync(filePath)) {
     return [];
   }
   return fs.readFileSync(filePath, "utf8").split(/\r?\n/).filter(Boolean).slice(-maxLines);
+}
+
+function isBenignCliWarning(line) {
+  return /channels\.feishu\.appSecret: unresolved SecretRef "env:default:OPENCLAW_FEISHU_APP_SECRET"/.test(line);
+}
+
+function sanitizeCliStderr(stderr) {
+  const lines = String(stderr || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => !isBenignCliWarning(line));
+
+  return lines.length ? lines.join("\n") : null;
 }
 
 function collectWarnings(...stderrList) {
@@ -81,6 +253,7 @@ function collectWarnings(...stderrList) {
       .flatMap((item) => String(item).split(/\r?\n/))
       .map((line) => line.trim())
       .filter(Boolean)
+      .filter((line) => !isBenignCliWarning(line))
   )].slice(0, 20);
 }
 
@@ -140,31 +313,58 @@ async function directModelTest() {
   const providerId = primaryModel.includes("/") ? primaryModel.split("/")[0] : "";
   const modelId = primaryModel.includes("/") ? primaryModel.split("/").slice(1).join("/") : "";
   const provider = config?.models?.providers?.[providerId];
-  const apiKey = config?.env?.QWEN_CODING_PLAN_API_KEY || "";
+  const api = provider?.api || "";
+  const apiKey = resolveProviderApiKey(
+    provider,
+    api === "anthropic-messages"
+      ? ["ANTHROPIC_AUTH_TOKEN", "MINIMAX_API_KEY"]
+      : ["OPENAI_API_KEY"]
+  );
   const baseUrl = provider?.baseUrl || "";
-  const endpoint = `${baseUrl.replace(/\/$/, "")}/chat/completions`;
+  const endpoint = api === "anthropic-messages"
+    ? `${baseUrl.replace(/\/$/, "")}/v1/messages`
+    : `${baseUrl.replace(/\/$/, "")}/chat/completions`;
 
-  if (!providerId || !modelId || !baseUrl || !apiKey) {
+  if (!providerId || !modelId || !baseUrl || !apiKey || !api) {
     return {
       ok: false,
       message: "当前模型配置不完整，无法做直连测试。",
-      details: { providerId, modelId, baseUrl: Boolean(baseUrl), apiKey: Boolean(apiKey) },
+      details: { providerId, modelId, baseUrl: Boolean(baseUrl), apiKey: Boolean(apiKey), api: Boolean(api) },
     };
   }
 
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: modelId,
-      messages: [{ role: "user", content: "Reply with OK only." }],
-      max_tokens: 20,
-      temperature: 0,
-    }),
-  });
+  const response = await fetch(
+    endpoint,
+    api === "anthropic-messages"
+      ? {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${apiKey}`,
+            "x-api-key": apiKey,
+            "anthropic-version": "2023-06-01",
+          },
+          body: JSON.stringify({
+            model: modelId,
+            messages: [{ role: "user", content: "Reply with OK only." }],
+            max_tokens: 128,
+            temperature: 0,
+          }),
+        }
+      : {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model: modelId,
+            messages: [{ role: "user", content: "Reply with OK only." }],
+            max_tokens: 20,
+            temperature: 0,
+          }),
+        }
+  );
 
   const text = await response.text();
   let data = null;
@@ -174,7 +374,15 @@ async function directModelTest() {
     data = null;
   }
 
-  const content = data?.choices?.[0]?.message?.content || data?.error?.message || text;
+  const content = api === "anthropic-messages"
+    ? (
+        data?.content?.find?.((item) => item.type === "text")?.text
+        || data?.content?.[0]?.text
+        || data?.content?.[0]?.thinking
+        || data?.error?.message
+        || text
+      )
+    : (data?.choices?.[0]?.message?.content || data?.error?.message || text);
   return {
     ok: response.ok,
     status: response.status,
@@ -218,7 +426,8 @@ async function runOpenClaw(args, timeoutMs = 120000) {
     `$env:no_proxy='localhost,127.0.0.1,::1'`,
     `Set-Location '${USER_HOME.replace(/\\/g, "\\\\")}'`,
   ].join("; ");
-  return runPowerShell(`${psPrefix}; & openclaw ${args}`, timeoutMs);
+  const cli = `& '${NODE_EXE.replace(/\\/g, "\\\\")}' '${OPENCLAW_ENTRY.replace(/\\/g, "\\\\")}' ${args}`;
+  return runPowerShell(`${psPrefix}; ${cli}`, timeoutMs);
 }
 
 function wait(ms) {
@@ -347,14 +556,25 @@ function extractJson(output) {
 }
 
 async function collectStatus() {
-  const config = readJson(CONFIG_PATH, {});
+  let config = readJson(CONFIG_PATH, {});
+  const controlUiRepair = ensureControlUiOrigins(config);
+  if (controlUiRepair.changed) {
+    config = readJson(CONFIG_PATH, config);
+  }
+  const modelSyncRepair = ensureMainAgentModelSync(config);
+  if (modelSyncRepair.changed) {
+    config = readJson(CONFIG_PATH, config);
+  }
   const state = getControlState();
   const manualStop = getGatewayManualStopState();
   const gatewayProbe = await httpCheck(DEFAULT_GATEWAY_URL);
   if (!gatewayProbe.ok && !manualStop.active && Date.now() - lastEnsureGatewayAt > 20000) {
     ensureGateway().catch(() => {});
   }
-  const tokenArg = config?.gateway?.auth?.token ? ` --token ${config.gateway.auth.token}` : "";
+  const gatewayToken = typeof config?.gateway?.auth?.token === "string"
+    ? config.gateway.auth.token
+    : "";
+  const tokenArg = gatewayToken ? ` --token ${gatewayToken}` : "";
   const [modelsRaw, memoryRaw, channelsRaw, skillsRaw, browserRaw] = await Promise.all([
     runOpenClaw("models status --json"),
     runOpenClaw("memory status --json"),
@@ -368,8 +588,8 @@ async function collectStatus() {
   const provider = providerId && config?.models?.providers ? config.models.providers[providerId] : null;
   const modelEntry = provider?.models?.[0] || null;
   const feishu = config?.channels?.feishu || {};
-  const token = config?.gateway?.auth?.token || "";
-  const dashboardUrl = token ? `${DEFAULT_GATEWAY_URL}#token=${token}` : DEFAULT_GATEWAY_URL;
+  setGatewayToken(config?.gateway?.auth?.token);
+  const dashboardUrl = DEFAULT_GATEWAY_URL;
 
   return {
     generatedAt: new Date().toISOString(),
@@ -393,6 +613,16 @@ async function collectStatus() {
       bind: config?.gateway?.bind || null,
       authMode: config?.gateway?.auth?.mode || null,
     },
+    controlUi: {
+      allowedOrigins: normalizeOriginList(config?.gateway?.controlUi?.allowedOrigins),
+      selfHealApplied: controlUiRepair.changed,
+      addedOrigins: controlUiRepair.missingOrigins,
+    },
+    modelSync: {
+      selfHealApplied: modelSyncRepair.changed,
+      primary: config?.agents?.defaults?.model?.primary || null,
+      mainAgentModel: config?.agents?.list?.find?.((agent) => agent && agent.id === "main")?.model || null,
+    },
     modelConfig: {
       providerId,
       baseUrl: provider?.baseUrl || "",
@@ -401,30 +631,36 @@ async function collectStatus() {
       modelName: modelEntry?.name || "",
       reasoning: Boolean(modelEntry?.reasoning),
       primary: primaryModel,
-      apiKeyMasked: maskSecret(config?.env?.QWEN_CODING_PLAN_API_KEY || ""),
+      apiKeyMasked: maskSecretLike(config?.env?.QWEN_CODING_PLAN_API_KEY || provider?.apiKey || ""),
     },
     feishuConfig: {
       enabled: Boolean(feishu?.enabled),
       appId: feishu?.appId || "",
-      appSecretMasked: maskSecret(feishu?.appSecret || ""),
+      appSecretMasked: maskSecretLike(feishu?.appSecret || ""),
     },
     memoryFolderExists: fs.existsSync(MEMORY_DIR),
     history: {
       modelHistory: Array.isArray(state.modelHistory) ? state.modelHistory : [],
     },
     raw: {
-      models: { ok: modelsRaw.ok, data: extractJson(modelsRaw.stdout), stderr: modelsRaw.stderr || null },
-      memory: { ok: memoryRaw.ok, data: extractJson(memoryRaw.stdout), stderr: memoryRaw.stderr || null },
-      channels: { ok: channelsRaw.ok, data: extractJson(channelsRaw.stdout), stderr: channelsRaw.stderr || null },
-      skills: { ok: skillsRaw.ok, data: extractJson(skillsRaw.stdout), stderr: skillsRaw.stderr || null },
-      browser: { ok: browserRaw.ok, data: extractJson(browserRaw.stdout), stderr: browserRaw.stderr || null },
+      models: { ok: modelsRaw.ok, data: extractJson(modelsRaw.stdout), stderr: sanitizeCliStderr(modelsRaw.stderr) },
+      memory: { ok: memoryRaw.ok, data: extractJson(memoryRaw.stdout), stderr: sanitizeCliStderr(memoryRaw.stderr) },
+      channels: { ok: channelsRaw.ok, data: extractJson(channelsRaw.stdout), stderr: sanitizeCliStderr(channelsRaw.stderr) },
+      skills: { ok: skillsRaw.ok, data: extractJson(skillsRaw.stdout), stderr: sanitizeCliStderr(skillsRaw.stderr) },
+      browser: { ok: browserRaw.ok, data: extractJson(browserRaw.stdout), stderr: sanitizeCliStderr(browserRaw.stderr) },
     },
     warnings: collectWarnings(
-      modelsRaw.stderr,
-      memoryRaw.stderr,
-      channelsRaw.stderr,
-      skillsRaw.stderr,
-      browserRaw.stderr
+      sanitizeCliStderr(modelsRaw.stderr),
+      sanitizeCliStderr(memoryRaw.stderr),
+      sanitizeCliStderr(channelsRaw.stderr),
+      sanitizeCliStderr(skillsRaw.stderr),
+      sanitizeCliStderr(browserRaw.stderr),
+      modelSyncRepair.changed
+        ? `Model self-heal: synced agents.list.main.model -> ${modelSyncRepair.primary}`
+        : null,
+      controlUiRepair.changed
+        ? `Control UI self-heal: added gateway.controlUi.allowedOrigins -> ${controlUiRepair.missingOrigins.join(", ")}`
+        : null
     ),
     logs: {
       controlCenter: tailFile(path.join(ROOT, "control-center.log")),
@@ -458,17 +694,31 @@ async function saveModelConfig(payload) {
   const modelName = payload.modelName || modelId;
   const primary = `${providerId}/${modelId}`;
   const legacyPrimary = `${providerId}/${modelId.replace(/-/g, " ")}`;
-
-  config.env = config.env || {};
-  const existingApiKey = config?.env?.QWEN_CODING_PLAN_API_KEY || "";
-  config.env.QWEN_CODING_PLAN_API_KEY = payload.apiKey || existingApiKey;
+  const isAnthropicProvider = (payload.api || "").trim() === "anthropic-messages";
   config.models = config.models || {};
   config.models.mode = config.models.mode || "merge";
   config.models.providers = config.models.providers || {};
+  const existingProvider = config.models.providers[providerId] || {};
+  const existingApiKey = existingProvider.apiKey;
+  let nextApiKey = existingApiKey;
+
+  if (payload.apiKey) {
+    nextApiKey = getEnvSecretRef(isAnthropicProvider ? "MINIMAX_API_KEY" : "OPENAI_API_KEY");
+  }
+
   config.models.providers[providerId] = {
-    baseUrl: payload.baseUrl || "https://coding.dashscope.aliyuncs.com/v1",
-    apiKey: "${QWEN_CODING_PLAN_API_KEY}",
-    api: payload.api || "openai-completions",
+    ...existingProvider,
+    baseUrl: payload.baseUrl || (isAnthropicProvider ? "https://v2.aicodee.com" : "https://coding.dashscope.aliyuncs.com/v1"),
+    apiKey: nextApiKey || getEnvSecretRef(isAnthropicProvider ? "MINIMAX_API_KEY" : "OPENAI_API_KEY"),
+    api: payload.api || (isAnthropicProvider ? "anthropic-messages" : "openai-completions"),
+    ...(isAnthropicProvider
+      ? {
+          auth: "api-key",
+          headers: {
+            "x-api-key": getEnvSecretRef("MINIMAX_API_KEY"),
+          },
+        }
+      : {}),
     models: [
       {
         id: modelId,
@@ -478,6 +728,12 @@ async function saveModelConfig(payload) {
       },
     ],
   };
+  if (config.env && Object.prototype.hasOwnProperty.call(config.env, "QWEN_CODING_PLAN_API_KEY")) {
+    delete config.env.QWEN_CODING_PLAN_API_KEY;
+    if (Object.keys(config.env).length === 0) {
+      delete config.env;
+    }
+  }
   config.agents = config.agents || {};
   config.agents.defaults = config.agents.defaults || {};
   config.agents.defaults.model = { primary };
@@ -485,11 +741,21 @@ async function saveModelConfig(payload) {
   delete config.agents.defaults.models[legacyPrimary];
   config.agents.defaults.models[primary] = { alias: modelName };
   config.agents.list = Array.isArray(config.agents.list) ? config.agents.list : [];
-  config.agents.list = config.agents.list.map((agent) =>
-    agent && agent.id === "main"
-      ? { ...agent, model: primary }
-      : agent
-  );
+  const mainIndex = config.agents.list.findIndex((agent) => agent && agent.id === "main");
+  if (mainIndex >= 0) {
+    config.agents.list[mainIndex] = {
+      ...config.agents.list[mainIndex],
+      model: primary,
+    };
+  } else {
+    config.agents.list.push({
+      id: "main",
+      model: primary,
+      tools: {
+        profile: "coding",
+      },
+    });
+  }
   writeJson(CONFIG_PATH, config);
   pushModelHistory({
     savedAt: new Date().toISOString(),
@@ -629,6 +895,13 @@ function readBody(req) {
 
 const server = http.createServer(async (req, res) => {
   try {
+    // Apply rate limiting to API endpoints
+    if (req.url.startsWith("/api/")) {
+      if (!rateLimiter(req)) {
+        return json(res, 429, { ok: false, message: "Too many requests" });
+      }
+    }
+
     if (req.method === "GET" && req.url === "/api/status") {
       return json(res, 200, await collectStatus());
     }
@@ -638,17 +911,27 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, status.logs);
     }
 
+    // Protected endpoints: require authentication
     if (req.method === "POST" && req.url === "/api/action") {
+      if (!validateAuth(req)) {
+        return json(res, 401, { ok: false, message: "Unauthorized" });
+      }
       const body = await readBody(req);
       return json(res, 200, await performAction(body.action, body.payload || {}));
     }
 
     if (req.method === "POST" && req.url === "/api/config/model") {
+      if (!validateAuth(req)) {
+        return json(res, 401, { ok: false, message: "Unauthorized" });
+      }
       const body = await readBody(req);
       return json(res, 200, await saveModelConfig(body));
     }
 
     if (req.method === "POST" && req.url === "/api/config/feishu") {
+      if (!validateAuth(req)) {
+        return json(res, 401, { ok: false, message: "Unauthorized" });
+      }
       const body = await readBody(req);
       return json(res, 200, await saveFeishuConfig(body));
     }
