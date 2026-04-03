@@ -30,6 +30,7 @@ function Import-UserEnvironmentVariable {
 foreach ($secretName in @(
   "ANTHROPIC_AUTH_TOKEN",
   "MINIMAX_API_KEY",
+  "MODELSCOPE_API_KEY",
   "OPENAI_API_KEY",
   "OPENCLAW_FEISHU_APP_SECRET",
   "OPENCLAW_GATEWAY_TOKEN"

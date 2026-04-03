@@ -1,0 +1,253 @@
+{
+  "meta": {
+    "lastTouchedVersion": "2026.3.23-2",
+    "lastTouchedAt": "2026-03-25T01:02:31.389Z"
+  },
+  "wizard": {
+    "lastRunAt": "2026-03-19T13:51:23.536Z",
+    "lastRunVersion": "2026.3.13",
+    "lastRunCommand": "doctor",
+    "lastRunMode": "local"
+  },
+  "secrets": {
+    "providers": {
+      "default": {
+        "source": "env"
+      }
+    }
+  },
+  "models": {
+    "mode": "merge",
+    "providers": {
+      "minimax": {
+        "baseUrl": "https://v2.aicodee.com",
+        "apiKey": {
+          "source": "env",
+          "provider": "default",
+          "id": "MINIMAX_API_KEY"
+        },
+        "auth": "api-key",
+        "api": "anthropic-messages",
+        "headers": {
+          "x-api-key": {
+            "source": "env",
+            "provider": "default",
+            "id": "MINIMAX_API_KEY"
+          }
+        },
+        "models": [
+          {
+            "id": "MiniMax-M2.7-highspeed",
+            "name": "MiniMax M2.7 Highspeed",
+            "reasoning": true,
+            "input": [
+              "text"
+            ],
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0
+            },
+            "contextWindow": 1000000,
+            "maxTokens": 8192
+          }
+        ]
+      },
+      "modelscope-glm5": {
+        "baseUrl": "https://api-inference.modelscope.cn",
+        "apiKey": {
+          "source": "env",
+          "provider": "default",
+          "id": "MODELSCOPE_API_KEY"
+        },
+        "auth": "api-key",
+        "api": "anthropic-messages",
+        "headers": {
+          "x-api-key": {
+            "source": "env",
+            "provider": "default",
+            "id": "MODELSCOPE_API_KEY"
+          }
+        },
+        "models": [
+          {
+            "id": "ZhipuAI/GLM-5",
+            "name": "GLM-5 (ModelScope)",
+            "reasoning": true,
+            "input": [
+              "text"
+            ],
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0
+            },
+            "contextWindow": 131072,
+            "maxTokens": 8192
+          }
+        ]
+      },
+      "qwen-coding-plan": {
+        "baseUrl": "https://coding.dashscope.aliyuncs.com/v1",
+        "apiKey": {
+          "source": "env",
+          "provider": "default",
+          "id": "OPENAI_API_KEY"
+        },
+        "api": "openai-completions",
+        "models": [
+          {
+            "id": "kimi-k2.5",
+            "name": "kimi-k2.5 (Coding Plan)",
+            "reasoning": true,
+            "input": [
+              "text"
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": {
+        "primary": "minimax/MiniMax-M2.7-highspeed",
+        "fallbacks": [
+          "modelscope-glm5/ZhipuAI/GLM-5"
+        ]
+      },
+      "models": {
+        "minimax/MiniMax-M2.7-highspeed": {
+          "alias": "MiniMax M2.7 Highspeed"
+        },
+        "modelscope-glm5/ZhipuAI/GLM-5": {
+          "alias": "GLM-5 (ModelScope)"
+        },
+        "qwen-coding-plan/kimi-k2.5": {
+          "alias": "kimi-k2.5 (Coding Plan)"
+        }
+      },
+      "compaction": {
+        "mode": "safeguard"
+      },
+      "heartbeat": {
+        "every": "30m",
+        "target": "last"
+      }
+    },
+    "list": [
+      {
+        "id": "main",
+        "model": "minimax/MiniMax-M2.7-highspeed",
+        "tools": {
+          "profile": "coding"
+        }
+      }
+    ]
+  },
+  "tools": {
+    "profile": "coding",
+    "exec": {
+      "security": "allowlist",
+      "ask": "on-miss"
+    }
+  },
+  "commands": {
+    "native": "auto",
+    "nativeSkills": "auto",
+    "restart": true,
+    "ownerDisplay": "raw"
+  },
+  "channels": {
+    "feishu": {
+      "appId": "cli_a90af31621789cd9",
+      "appSecret": {
+        "source": "env",
+        "provider": "default",
+        "id": "OPENCLAW_FEISHU_APP_SECRET"
+      },
+      "tools": {
+        "doc": false
+      },
+      "enabled": true
+    }
+  },
+  "gateway": {
+    "mode": "local",
+    "bind": "loopback",
+    "controlUi": {
+      "allowedOrigins": [
+        "http://127.0.0.1:18789",
+        "http://localhost:18789",
+        "http://127.0.0.1:18809",
+        "http://localhost:18809"
+      ]
+    },
+    "auth": {
+      "mode": "token",
+      "token": {
+        "source": "env",
+        "provider": "default",
+        "id": "OPENCLAW_GATEWAY_TOKEN"
+      }
+    },
+    "trustedProxies": [
+      "127.0.0.1",
+      "::1"
+    ]
+  },
+  "skills": {
+    "entries": {
+      "skill-vetter": {
+        "enabled": true
+      },
+      "liang-tavily-search": {
+        "enabled": false
+      },
+      "summarize": {
+        "enabled": true
+      },
+      "self-improving-agent": {
+        "enabled": true
+      }
+    }
+  },
+  "plugins": {
+    "allow": [
+      "device-pair",
+      "feishu",
+      "memory-core",
+      "ollama",
+      "phone-control",
+      "sglang",
+      "talk-voice",
+      "vllm",
+      "openclaw-weixin"
+    ],
+    "entries": {
+      "feishu": {
+        "enabled": true
+      },
+      "openclaw-weixin": {
+        "enabled": false
+      }
+    },
+    "installs": {
+      "openclaw-weixin": {
+        "source": "npm",
+        "spec": "@tencent-weixin/openclaw-weixin",
+        "installPath": "C:\\Users\\71976\\.openclaw\\extensions\\openclaw-weixin",
+        "version": "1.0.2",
+        "resolvedName": "@tencent-weixin/openclaw-weixin",
+        "resolvedVersion": "1.0.2",
+        "resolvedSpec": "@tencent-weixin/openclaw-weixin@1.0.2",
+        "integrity": "sha512-kYPEowHB/0VWt9nQFee/AS6Fb+jbnu38wjkgZDBdKTuJoBL0IBW2obQ0ymgFKBFJJL9rDwnFrb/17ORGZD/X8Q==",
+        "shasum": "244baf0a873683a9c350d0f0b5bc055c07b0eb39",
+        "resolvedAt": "2026-03-22T11:17:38.722Z",
+        "installedAt": "2026-03-22T11:18:56.595Z"
+      }
+    }
+  }
+}

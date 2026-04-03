@@ -1,0 +1,12 @@
+﻿# Backups (contain full config history)
+backups/
+
+# Control center build output
+control-center/build/
+control-center/node_modules/
+
+# OpenClaw workspace files (user-specific)
+C:/Users/71976/.openclaw/workspace/
+
+# Local state
+*.log
