@@ -33,10 +33,12 @@ Use this skill for the validated Win11-native setup that was made to work on thi
 
 ## Current Baseline
 
-- As of `2026-03-24`, the default agent model on this machine is `minimax/MiniMax-M2.7-highspeed`.
-- The validated provider base URL is `https://v2.aicodee.com`.
-- Treat that MiniMax baseline as temporary and re-evaluate it by `2026-04-10`.
-- Keep `qwen-coding-plan/kimi-k2.5` configured and directly probeable as the backup provider.
+- As of `2026-04-03`, the default agent model on this machine is `openrouter/qwen/qwen3.6-plus:free` (via OpenRouter, Anthropic Messages API).
+- The validated provider base URL is `https://openrouter.ai/api`.
+- The previous MiniMax baseline (`minimax/MiniMax-M2.7-highspeed` via `https://v2.aicodee.com`) was backed up to `D:\AI_Projects\openclaw\backups\2026-04-03-qwen-switch\`.
+- A one-click restore script is available at `backups\2026-04-03-qwen-switch\restore-minimax.cmd`.
+- Keep `qwen-coding-plan/kimi-k2.5` configuration preserved for potential future use (currently removed from live config).
+- Feishu bot `OpenClaw_lqj` (appId: `cli_a90af31621789cd9`) remains active and unchanged.
 
 ## Dashboard Stability Rules
 
@@ -81,6 +83,11 @@ Get-NetTCPConnection -LocalPort 18789,18809 -State Listen -ErrorAction SilentlyC
   - `gateway-start.cmd` must use the absolute `node.exe` path
   - launchers must import the required user environment variables from `HKCU\Environment` before calling `openclaw`
   - launchers should wait for `http://127.0.0.1:18789/` to return `200` before opening browser UI
+- `gateway-start.cmd` must NOT load env vars that are no longer needed (e.g., MINIMAX_API_KEY, MODELSCOPE_API_KEY, OPENAI_API_KEY after switching to OpenRouter). Only load:
+  - `ANTHROPIC_AUTH_TOKEN` (OpenRouter API key)
+  - `ANTHROPIC_BASE_URL` (set to `https://openrouter.ai/api`)
+  - `OPENCLAW_FEISHU_APP_SECRET`
+  - `OPENCLAW_GATEWAY_TOKEN`
 - Prefer these file roles:
   - `gateway-start.cmd`: single source of truth for starting the gateway
   - `gateway-supervisor.cmd`: keepalive loop only
@@ -269,19 +276,136 @@ The validated backup-provider shape in `openclaw.json` is:
 }
 ```
 
+## OpenRouter Qwen Rules
+
+- As of `2026-04-03`, the default agent model on this machine was switched from `minimax/MiniMax-M2.7-highspeed` to `openrouter/qwen/qwen3.6-plus:free`.
+- OpenRouter provides an Anthropic Messages API compatible endpoint at `https://openrouter.ai/api`.
+- Configure OpenRouter as a custom provider using Anthropic-compatible messages API, NOT OpenAI completions.
+- Keep `ANTHROPIC_AUTH_TOKEN` set to the OpenRouter API key (`sk-or-v1-...`) in `HKCU\Environment`.
+- Keep `ANTHROPIC_BASE_URL` set to `https://openrouter.ai/api` in `HKCU\Environment`.
+
+The validated OpenRouter provider shape in `openclaw.json` is:
+
+```json
+{
+  "models": {
+    "mode": "merge",
+    "providers": {
+      "openrouter": {
+        "baseUrl": "https://openrouter.ai/api",
+        "auth": "api-key",
+        "api": "anthropic-messages",
+        "apiKey": {
+          "source": "env",
+          "provider": "default",
+          "id": "ANTHROPIC_AUTH_TOKEN"
+        },
+        "headers": {
+          "x-api-key": {
+            "source": "env",
+            "provider": "default",
+            "id": "ANTHROPIC_AUTH_TOKEN"
+          }
+        },
+        "models": [
+          {
+            "id": "qwen/qwen3.6-plus:free",
+            "name": "Qwen 3.6 Plus (Free)",
+            "reasoning": true,
+            "input": ["text"],
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0
+            },
+            "contextWindow": 131072,
+            "maxTokens": 8192
+          }
+        ]
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": {
+        "primary": "openrouter/qwen/qwen3.6-plus:free"
+      }
+    },
+    "list": [
+      {
+        "id": "main",
+        "model": "openrouter/qwen/qwen3.6-plus:free",
+        "tools": {
+          "profile": "coding"
+        }
+      }
+    ]
+  }
+}
+```
+
+Direct verification shape for OpenRouter:
+
+```powershell
+$body = @{
+  model = "qwen/qwen3.6-plus:free"
+  messages = @(@{ role = "user"; content = "Reply with OK only." })
+  max_tokens = 20
+  temperature = 0
+  stream = $false
+} | ConvertTo-Json -Depth 6
+
+Invoke-RestMethod -Method Post `
+  -Uri "https://openrouter.ai/api/v1/chat/completions" `
+  -Headers @{ Authorization = "Bearer $env:ANTHROPIC_AUTH_TOKEN" } `
+  -ContentType "application/json" `
+  -Body $body
+```
+
+Anthropic-style API verification (OpenClaw uses this format):
+
+```powershell
+$body = @{
+  model = "qwen/qwen3.6-plus:free"
+  messages = @(@{ role = "user"; content = "Reply with OK only." })
+  max_tokens = 20
+} | ConvertTo-Json -Depth 6
+
+Invoke-WebRequest -Method Post `
+  -Uri "https://openrouter.ai/api/v1/messages" `
+  -Headers @{
+    Authorization = "Bearer $env:ANTHROPIC_AUTH_TOKEN"
+    "HTTP-Referer" = "http://127.0.0.1:18789"
+    "X-Title" = "OpenClaw"
+  } `
+  -ContentType "application/json" `
+  -Body $body `
+  -UseBasicParsing
+```
+
+Expected results:
+- Direct OpenAI-style API test returns `choices[0].message.content` with model `qwen/qwen3.6-plus-04-02:free`
+- Anthropic-style API test returns `content[0].text` with valid thinking content
+- Gateway dashboard at `http://127.0.0.1:18789/` returns 200
+- Local agent runs and responds correctly
+
 ## Model Switching Rules
 
 - In the control center, model switching should favor preset buttons and a short form, not full raw config editing.
 - After switching models, verify in this order:
-  - config write result
-  - control-center direct provider test
-  - fresh process runtime state
-  - fresh local agent run
+  1. config write result (`openclaw.json` + `models.json` both updated)
+  2. direct provider API test (OpenRouter chat completions + messages API)
+  3. gateway restart with new `HKCU\Environment` vars loaded
+  4. dashboard `http://127.0.0.1:18789/` returns 200
+  5. fresh local agent run reports correct model
 - A stale OpenClaw session or stale `server.js` process can keep using an older model even after config changes.
 - If a direct test succeeds but an agent turn still reports the old model, treat that as runtime state drift until proven otherwise.
 - Do not trust only `agents.defaults.model.primary`; also check `agents.list.main.model`.
 - Do not trust only `openclaw.json`; also check `C:\Users\71976\.openclaw\agents\main\agent\models.json`.
 - Do not trust only the control-center page; verify the actual owner process and creation time on `18809`.
+- **Critical**: The running gateway process inherits its environment from its parent process. After changing `HKCU\Environment` values, you MUST kill the existing gateway process and start a fresh one — the old process will NOT pick up the new values.
+- **Agent models.json cleanup**: When switching providers, `agents/main/agent/models.json` may still contain entries from old providers (minimax, minimax-portal, openai-codex, etc.). Clean it to only include the new active provider.
 
 Common false-success patterns on this machine:
 
@@ -336,6 +460,52 @@ Invoke-WebRequest -Method Post `
   - OpenClaw channel status
   - Direct Feishu token exchange
 
+### Feishu Pairing
+
+- The user's Feishu open_id is `ou_9d244abfcbfc335fab79ecf7d7dd6c1d`.
+- This is stored in `C:\Users\71976\.openclaw\credentials\feishu-pairing.json` under `allowFrom`.
+- The Feishu bot is `OpenClaw_lqj` (appId: `cli_a90af31621789cd9`).
+- Pairing happens when the user first sends a message to the bot on Feishu — OpenClaw records the open_id automatically.
+
+### Sending Messages to Feishu from CLI
+
+To make the agent reply on Feishu (not just return text to the CLI):
+
+```powershell
+$env:ANTHROPIC_AUTH_TOKEN = [Environment]::GetEnvironmentVariable("ANTHROPIC_AUTH_TOKEN", "User")
+$env:ANTHROPIC_BASE_URL = [Environment]::GetEnvironmentVariable("ANTHROPIC_BASE_URL", "User")
+$env:OPENCLAW_FEISHU_APP_SECRET = [Environment]::GetEnvironmentVariable("OPENCLAW_FEISHU_APP_SECRET", "User")
+$env:OPENCLAW_GATEWAY_TOKEN = [Environment]::GetEnvironmentVariable("OPENCLAW_GATEWAY_TOKEN", "User")
+
+& "C:\Program Files\nodejs\node.exe" "C:\Users\71976\AppData\Roaming\npm\node_modules\openclaw\dist\index.js" agent --agent main --channel feishu --to "ou_9d244abfcbfc335fab79ecf7d7dd6c1d" --message "你的消息内容" --deliver
+
+# Required flags:
+#   --channel feishu   -> selects the Feishu plugin as delivery channel
+#   --to "ou_xxx"      -> the user's Feishu open_id from feishu-pairing.json
+#   --deliver          -> actually sends the reply to the channel (without this, reply only goes to CLI)
+```
+
+Internal mechanism:
+- When `--deliver` is used with `--channel feishu --to <open_id>`, the gateway creates a session keyed to that channel+target
+- The agent receives the message, processes it, and uses `sessions_send` internally to route its reply back through the Feishu plugin
+- The Feishu plugin calls `sendMessageFeishu` which uses the bot's `tenant_access_token` to POST to Feishu's IM API
+
+### Agent-side Session Delivery
+
+The agent can also send Feishu messages during a conversation using the `sessions_send` tool:
+
+```json
+{
+  "tool": "sessions_send",
+  "arguments": {
+    "sessionKey": "feishu:ou_9d244abfcbfc335fab79ecf7d7dd6c1d:main",
+    "message": "Proactive message from agent"
+  }
+}
+```
+
+Or simpler: just use `--deliver` in the CLI call and the agent's natural reply text is automatically routed to Feishu.
+
 Required config keys:
 
 ```json
@@ -356,6 +526,44 @@ Required config keys:
   }
 }
 ```
+
+## GitHub Push
+
+- SSH key: `C:\Users\71976\.ssh\github_openclaw_skill_ed25519`
+- SSH config at `C:\Users\71976\.ssh\config` already maps `github.com` to port 443 with this key
+- GitHub username: `Foreverwonder`
+- This repo remote: `git@github.com:Foreverwonder/openclaw-win11-qwen-feishu-skill.git`
+- Primary branch: `main` (NOT `master`)
+
+Push workflow:
+
+```bash
+# 1. Add or update remote (only needed if no remote exists)
+git remote add origin git@github.com:Foreverwonder/openclaw-win11-qwen-feishu-skill.git
+# or update existing:
+git remote set-url origin git@github.com:Foreverwonder/openclaw-win11-qwen-feishu-skill.git
+
+# 2. Ensure branch is named main
+git branch -M main
+
+# 3. Fetch remote changes (remote may have commits not in local)
+git fetch origin
+
+# 4. Rebase local onto remote main
+# If conflicts arise on files that remote already owns, use theirs:
+git rebase origin/main   # resolve any conflicts, then continue
+# For a conflicted file where remote version should win:
+git checkout --theirs <file> && git add <file>
+
+# 5. Push with explicit SSH command (SSH config handles this, but explicit is safer)
+GIT_SSH_COMMAND="ssh -i /c/Users/71976/.ssh/github_openclaw_skill_ed25519 -o StrictHostKeyChecking=no" git push -u origin main
+```
+
+Common issues:
+- **`remote exists` error**: use `git remote set-url origin <url>` instead of `git remote add`
+- **`not found` / `could not read from remote repo`**: email not verified on GitHub — user must verify at https://github.com/settings/emails
+- **`rejected` (non-fast-forward)**: remote has commits; must `git fetch origin && git rebase origin/main` first
+- **`master` vs `main`**: always use `main` for this repo
 
 ## v2rayN and TUN Rules
 
@@ -390,7 +598,7 @@ openclaw agent --agent main --message "Reply with OK only." --json --timeout 120
 
 Expected results:
 
-- `openclaw models status --plain` shows `minimax/MiniMax-M2.7-highspeed`
+- `openclaw models status --plain` shows `openrouter/qwen/qwen3.6-plus:free`
 - `openclaw channels status --probe` reports Feishu `works`
 - `openclaw secrets audit --check` exits clean
 - `openclaw dashboard --no-open` prints a `127.0.0.1:18789` URL
