@@ -2,7 +2,7 @@
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
-const { spawn } = require("child_process");
+const { spawn, execFile } = require("child_process");
 
 const HOST = "127.0.0.1";
 const PORT = 18809;
@@ -459,30 +459,6 @@ async function ensureGateway() {
     stdio: "ignore",
   }).unref();
 
-  spawn(
-    "cmd.exe",
-    [
-      "/c",
-      "start",
-      "",
-      "/min",
-      "cmd",
-      "/c",
-      `"${NODE_EXE}" "${OPENCLAW_ENTRY}" gateway run --port 18789 --ws-log compact`,
-    ],
-    {
-      cwd: USER_HOME,
-      env: {
-        ...BASE_ENV,
-        OPENCLAW_CONFIG_PATH: CONFIG_PATH,
-        OPENCLAW_STATE_DIR: OPENCLAW_DIR,
-      },
-      detached: true,
-      windowsHide: true,
-      stdio: "ignore",
-    }
-  ).unref();
-
   for (let i = 0; i < 8; i += 1) {
     const probe = await httpCheck(DEFAULT_GATEWAY_URL);
     if (probe.ok) {
@@ -571,24 +547,30 @@ async function collectStatus() {
   if (!gatewayProbe.ok && !manualStop.active && Date.now() - lastEnsureGatewayAt > 20000) {
     ensureGateway().catch(() => {});
   }
-  const gatewayToken = typeof config?.gateway?.auth?.token === "string"
-    ? config.gateway.auth.token
-    : "";
+  let gatewayToken = "";
+  const rawToken = config?.gateway?.auth?.token;
+  if (typeof rawToken === "string") {
+    gatewayToken = rawToken;
+  } else if (typeof rawToken === "object" && rawToken?.id) {
+    gatewayToken = readUserEnvVar(rawToken.id);
+  }
   const tokenArg = gatewayToken ? ` --token ${gatewayToken}` : "";
-  const [modelsRaw, memoryRaw, channelsRaw, skillsRaw, browserRaw] = await Promise.all([
-    runOpenClaw("models status --json"),
-    runOpenClaw("memory status --json"),
-    runOpenClaw("channels status --json"),
-    runOpenClaw("skills list --json"),
-    runOpenClaw(`browser status --json${tokenArg}`),
-  ]);
+
+  // 性能优化：顺序执行命令，而不是 Promise.all 并发。
+  // 因为每次 runOpenClaw 都会在 Windows 启动一个新的 PowerShell 和 Node.js 进程。
+  // 并发拉起 5 个重进程会导致 CPU 瞬间 100% 占用并引发鼠标卡顿。
+  const modelsRaw = await runOpenClaw("models status --json");
+  const memoryRaw = await runOpenClaw("memory status --json");
+  const channelsRaw = await runOpenClaw("channels status --json");
+  const skillsRaw = await runOpenClaw("skills list --json");
+  const browserRaw = await runOpenClaw(`browser status --json${tokenArg}`);
 
   const primaryModel = config?.agents?.defaults?.model?.primary || "未设置";
   const providerId = primaryModel.includes("/") ? primaryModel.split("/")[0] : null;
   const provider = providerId && config?.models?.providers ? config.models.providers[providerId] : null;
   const modelEntry = provider?.models?.[0] || null;
   const feishu = config?.channels?.feishu || {};
-  setGatewayToken(config?.gateway?.auth?.token);
+  setGatewayToken(gatewayToken);
   const dashboardUrl = DEFAULT_GATEWAY_URL;
 
   return {
@@ -612,6 +594,7 @@ async function collectStatus() {
       mode: config?.gateway?.mode || null,
       bind: config?.gateway?.bind || null,
       authMode: config?.gateway?.auth?.mode || null,
+      authToken: gatewayToken,
     },
     controlUi: {
       allowedOrigins: normalizeOriginList(config?.gateway?.controlUi?.allowedOrigins),
@@ -837,8 +820,9 @@ async function performAction(action, payload = {}) {
           '--proxy-bypass-list="<-loopback>;127.0.0.1;localhost;::1"',
           payload.url || "https://docs.openclaw.ai/cli",
         ], { detached: true, windowsHide: true, stdio: "ignore" }).unref();
+        return { ok: true, message: "已用 Edge 打开官方文档。" };
       }
-      return { ok: true, message: "已打开官方文档。" };
+      return { ok: false, message: "未找到 Edge 浏览器，请手动前往文档页面。" };
     default:
       return { ok: false, message: `不支持的动作：${action}` };
   }
@@ -867,6 +851,29 @@ function serveStatic(req, res) {
     "Cache-Control": "no-store",
   });
   fs.createReadStream(filePath).pipe(res);
+}
+
+// 全局缓存控制中心状态，避免频繁请求后端带来的卡顿
+let _statusCache = null;
+let _statusCacheTime = 0;
+let _statusCollectingPromise = null;
+
+async function collectStatusWithCache(force = false) {
+  // 如果非强制刷新，并且缓存有效（25秒内），直接返回缓存
+  if (!force && _statusCache && (Date.now() - _statusCacheTime < 25000)) {
+    return _statusCache;
+  }
+  // 如果当前已经有一个收集任务在运行，复用它
+  if (_statusCollectingPromise) {
+    return _statusCollectingPromise;
+  }
+  _statusCollectingPromise = collectStatus().finally(() => {
+    _statusCollectingPromise = null;
+  });
+  const res = await _statusCollectingPromise;
+  _statusCache = res;
+  _statusCacheTime = Date.now();
+  return res;
 }
 
 function readBody(req) {
@@ -902,12 +909,14 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
-    if (req.method === "GET" && req.url === "/api/status") {
-      return json(res, 200, await collectStatus());
+    if (req.method === "GET" && req.url.startsWith("/api/status")) {
+      const force = req.url.includes("force=true");
+      return json(res, 200, await collectStatusWithCache(force));
     }
 
-    if (req.method === "GET" && req.url === "/api/logs") {
-      const status = await collectStatus();
+    if (req.method === "GET" && req.url.startsWith("/api/logs")) {
+      const force = req.url.includes("force=true");
+      const status = await collectStatusWithCache(force);
       return json(res, 200, status.logs);
     }
 

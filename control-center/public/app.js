@@ -1,4 +1,4 @@
-﻿const output = document.getElementById("output");
+const output = document.getElementById("output");
 const stickyStatus = document.querySelector(".sticky-status");
 const toggleOutputBtn = document.getElementById("toggleOutputBtn");
 const statsGrid = document.getElementById("statsGrid");
@@ -17,6 +17,7 @@ const saveAndTestBtn = document.getElementById("saveAndTestBtn");
 const controlCenterLog = document.getElementById("controlCenterLog");
 const gatewayLog = document.getElementById("gatewayLog");
 let outputCollapsed = false;
+let authToken = "";
 
 function statusClass(ok, warn = false) {
   if (ok) return "status-pill status-ok";
@@ -30,8 +31,12 @@ function setOutput(title, payload) {
 }
 
 async function api(path, options = {}) {
+  const headers = { "Content-Type": "application/json" };
+  if (authToken && options.method === "POST") {
+    headers["Authorization"] = `Bearer ${authToken}`;
+  }
   const response = await fetch(path, {
-    headers: { "Content-Type": "application/json" },
+    headers,
     ...options,
   });
   const data = await response.json();
@@ -42,12 +47,24 @@ async function api(path, options = {}) {
 async function runAction(action, payload = {}) {
   setOutput("执行中…", { action, payload });
   const result = await api("/api/action", {
-    method: "POST",
-    body: JSON.stringify({ action, payload }),
-  });
-  setOutput(`动作完成: ${action}`, result);
-  await refresh();
+      method: "POST",
+      body: JSON.stringify({ action, payload }),
+    });
+    setOutput(`动作完成: ${action}`, result);
+    await refresh(true);
 }
+
+document.getElementById("refreshBtn").addEventListener("click", async () => {
+  const status = await refresh(true);
+  setOutput("状态已刷新", {
+    generatedAt: status.generatedAt,
+    gateway: status.gateway.probe,
+    controlUi: status.controlUi,
+    model: status.modelConfig.primary,
+    skills: (status.raw.skills.data?.skills || []).length,
+    feishu: status.raw.channels.data?.channels?.feishu || null,
+  });
+});
 
 function mask(secret) {
   if (!secret) return "";
@@ -227,8 +244,11 @@ function fillForms(status) {
   feishuForm.enabled.checked = Boolean(status.feishuConfig.enabled);
 }
 
-async function refresh() {
-  const status = await api("/api/status");
+async function refresh(force = false) {
+  const status = await api(force ? "/api/status?force=true" : "/api/status");
+  if (status.gateway?.authToken) {
+    authToken = status.gateway.authToken;
+  }
   renderStats(status);
   renderCurrentModel(status);
   renderPaths(status);
@@ -239,18 +259,15 @@ async function refresh() {
   renderModelHistory(status);
   renderLogs(status);
   fillForms(status);
-  setOutput("状态已刷新", {
-    generatedAt: status.generatedAt,
-    gateway: status.gateway.probe,
-    controlUi: status.controlUi,
-    model: status.modelConfig.primary,
-    skills: (status.raw.skills.data?.skills || []).length,
-    feishu: status.raw.channels.data?.channels?.feishu || null,
-  });
+  return status;
 }
 
-document.getElementById("refreshBtn").addEventListener("click", refresh);
-document.getElementById("refreshChannelsBtn").addEventListener("click", refresh);
+document.getElementById("refreshChannelsBtn").addEventListener("click", async () => {
+  const status = await refresh(true);
+  setOutput("渠道状态已刷新", {
+    feishu: status.raw.channels.data?.channels?.feishu || null,
+  });
+});
 
 document.addEventListener("click", async (event) => {
   const action = event.target.dataset.action;
@@ -332,16 +349,23 @@ async function submitModelForm({ testAfterSave = false } = {}) {
     };
     setOutput("模型配置已保存", summary);
     if (testAfterSave) {
-      const testResult = await api("/api/action", {
-        method: "POST",
-        body: JSON.stringify({ action: "testModel", payload: {} }),
-      });
-      setOutput("保存并测试完成", {
-        ...summary,
-        test: testResult.stdout || testResult.message || testResult,
-      });
+      try {
+        const testResult = await api("/api/action", {
+          method: "POST",
+          body: JSON.stringify({ action: "testModel", payload: {} }),
+        });
+        setOutput("保存并测试完成", {
+          ...summary,
+          test: testResult.stdout || testResult.message || testResult,
+        });
+      } catch (testError) {
+        setOutput("保存成功但模型测试失败", {
+          ...summary,
+          testError: testError.message || String(testError),
+        });
+      }
     }
-    await refresh();
+    await refresh(true);
   } catch (error) {
     setOutput("模型配置保存失败", error.message || String(error));
   }
@@ -359,7 +383,7 @@ saveAndTestBtn.addEventListener("click", async () => {
 toggleOutputBtn.addEventListener("click", () => {
   outputCollapsed = !outputCollapsed;
   stickyStatus.classList.toggle("collapsed", outputCollapsed);
-  toggleOutputBtn.textContent = outputCollapsed ? "??" : "??";
+  toggleOutputBtn.textContent = outputCollapsed ? "展开" : "收起";
 });
 
 feishuForm.addEventListener("submit", async (event) => {
@@ -376,7 +400,7 @@ feishuForm.addEventListener("submit", async (event) => {
       body: JSON.stringify(payload),
     });
     setOutput("飞书配置已保存", result);
-    await refresh();
+    await refresh(true);
   } catch (error) {
     setOutput("飞书配置保存失败", error.message || String(error));
   }
@@ -392,4 +416,4 @@ setInterval(() => {
       setOutput("自动刷新失败", error.message || String(error));
     });
   }
-}, 30000);
+}, 60000);
