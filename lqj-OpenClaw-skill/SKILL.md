@@ -1,6 +1,6 @@
 ---
-name: lqj-OpenClaw-skill
-description: Master skill for OpenClaw Win11 maintenance, Qwen/Feishu integration, and ECC Heartbeat automated optimization loop. Invoke to manage OpenClaw or run heartbeat.
+name: "lqj-OpenClaw-skill"
+description: "Master skill for OpenClaw Win11 maintenance, Qwen/Feishu integration, and ECC Heartbeat automated optimization loop. Invoke to manage OpenClaw or run heartbeat."
 ---
 
 # OpenClaw Win11 Maintenance
@@ -97,7 +97,6 @@ Get-NetTCPConnection -LocalPort 18789,18809 -State Listen -ErrorAction SilentlyC
 > `call :load_user_env OPENAI_API_KEY`
 > `call :load_user_env MODELSCOPE_API_KEY`
 > Without these, the Control Center's model switching will fatally break the Gateway.
-
 - Prefer these file roles:
   - `gateway-start.cmd`: single source of truth for starting the gateway
   - `gateway-supervisor.cmd`: keepalive loop only

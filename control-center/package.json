@@ -1,0 +1,20 @@
+{
+  "name": "control-center",
+  "version": "1.0.0",
+  "description": "This folder contains the local Win11-native control center we built for OpenClaw.",
+  "main": "playwright.config.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "@playwright/test": "^1.59.1"
+  }
+}

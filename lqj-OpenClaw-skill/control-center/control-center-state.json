@@ -1,0 +1,13 @@
+{
+  "modelHistory": [
+    {
+      "savedAt": "2026-03-23T04:41:10.177Z",
+      "providerId": "qwen-coding-plan",
+      "modelId": "kimi-k2.5",
+      "modelName": "kimi-k2.5 (Coding Plan)",
+      "baseUrl": "https://coding.dashscope.aliyuncs.com/v1",
+      "api": "openai-completions",
+      "reasoning": true
+    }
+  ]
+}

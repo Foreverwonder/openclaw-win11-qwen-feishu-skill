@@ -2,39 +2,74 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## 项目概述
+## Project Overview
 
-这是一个 OpenClaw 配置和数据存储库。OpenClaw 是一个 MCP (Model Context Protocol) 服务器，用于连接 Claude 和微信/飞书等即时通信工具。
+This is the `lqj-OpenClaw-skill` repository - a configuration and operations hub for the OpenClaw MCP gateway running on native Windows 11. OpenClaw connects AI models to messaging platforms (Feishu) through an MCP gateway, with a local web control center for management.
 
-## 环境配置
+## Environment
 
-当前项目运行在 Windows 10 上的 WSL2 (Ubuntu 24.04) 环境中：
+Native Windows 11 (not WSL):
 
-- **端口配置**: WSL 中 OpenClaw 运行在端口 `18790`（避免与 Windows 系统进程在 18789 端口的冲突）
-- **访问地址**: http://127.0.0.1:18790/
-- **Node.js**: v22.13.1，安装在 `~/node/bin/node`
-- **OpenClaw**: 通过 npm 安装在 WSL 用户目录下
+- **Gateway port**: `18789` (OpenClaw gateway + dashboard)
+- **Control Center port**: `18809` (management UI)
+- **Node.js**: `C:\Program Files\nodejs\node.exe`
+- **OpenClaw entry**: `C:\Users\71976\AppData\Roaming\npm\node_modules\openclaw\dist\index.js`
+- **OpenClaw config**: `C:\Users\71976\.openclaw\openclaw.json`
+- **Current model**: `openrouter/qwen/qwen3.6-plus:free` (via OpenRouter, Anthropic Messages API)
 
-## OpenClaw 管理命令
+## OpenClaw CLI Commands
 
-在 WSL Ubuntu 环境中执行以下命令：
+Run in PowerShell with environment variables loaded:
 
-```bash
-# 查看状态
-openclaw gateway status
+```powershell
+# Load required env vars first
+$env:OPENCLAW_CONFIG_PATH = "C:\Users\71976\.openclaw\openclaw.json"
+$env:OPENCLAW_STATE_DIR = "C:\Users\71976\.openclaw"
 
-# 停止服务
-openclaw gateway stop
+# Status
+& "C:\Program Files\nodejs\node.exe" "C:\Users\71976\AppData\Roaming\npm\node_modules\openclaw\dist\index.js" gateway status
 
-# 启动服务
-openclaw gateway start
+# Config validate
+& "C:\Program Files\nodejs\node.exe" "C:\Users\71976\AppData\Roaming\npm\node_modules\openclaw\dist\index.js" config validate
 
-# 查看日志
-openclaw logs --follow
+# Models status
+& "C:\Program Files\nodejs\node.exe" "C:\Users\71976\AppData\Roaming\npm\node_modules\openclaw\dist\index.js" models status --plain
 ```
 
-注意：确保 PATH 包含 `~/.npm-global/bin` 和 `~/node/bin`。
+Or use the control center at `http://127.0.0.1:18809/` for most operations.
 
-## 系统服务
+## Key Files
 
-OpenClaw 已配置为 systemd 用户服务，可实现开机自启动。
+| File | Purpose |
+|------|---------|
+| `SKILL.md` | Master skill with all maintenance rules (lqj-OpenClaw-skill) |
+| `control-center/server.js` | Control center backend (pure Node.js HTTP server) |
+| `control-center/public/` | Control center frontend (vanilla HTML/CSS/JS) |
+| `ecc-heartbeat-skill/SKILL.md` | ECC heartbeat scheduler (triggers lqj-OpenClaw-skill) |
+| `self-improving-agent/` | Self-improvement skill (learnings/errors/features) |
+| `lqj-OpenClaw-skill/` | Renamed skill directory (matches root SKILL.md) |
+
+## Gateway Lifecycle
+
+- **Start**: `C:\Users\71976\.openclaw\gateway-start.cmd`
+- **Supervisor**: `C:\Users\71976\.openclaw\gateway-supervisor.cmd` (keepalive loop)
+- **Stop**: Use control center or `openclaw gateway stop`
+- **Dashboard**: `D:\AI_Projects\openclaw\openclaw-dashboard-stable.cmd`
+
+## Secrets
+
+All secrets stored in `HKCU\Environment` as user environment variables:
+- `ANTHROPIC_AUTH_TOKEN` (OpenRouter API key)
+- `ANTHROPIC_BASE_URL` (set to `https://openrouter.ai/api`)
+- `OPENCLAW_FEISHU_APP_SECRET`
+- `OPENCLAW_GATEWAY_TOKEN`
+- `MINIMAX_API_KEY` (backup provider)
+- `OPENAI_API_KEY` (backup provider)
+
+Use SecretRef objects in `openclaw.json`, never plaintext.
+
+## GitHub
+
+- Remote: `git@github.com:Foreverwonder/openclaw-win11-qwen-feishu-skill.git`
+- Branch: `main`
+- SSH key: `C:\Users\71976\.ssh\github_openclaw_skill_ed25519`

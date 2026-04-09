@@ -2,40 +2,95 @@
 
 ## Project Structure & Module Organization
 
-This repository is a lightweight configuration and operations hub for the OpenClaw MCP gateway. Most content lives at the root as working notes and artifacts rather than application source code. Key items include:
+This repository is the `lqj-OpenClaw-skill` - a configuration and operations hub for the OpenClaw MCP gateway running on native Windows 11.
 
-- `CLAUDE.md`: environment and runtime notes (WSL2, ports, Node version).
-- `.claude/settings.local.json`: local agent settings.
-- `cleanup.ps1`: Windows automation script for closing specific windows.
-- `*.txt`: operational notes, API details, and status logs.
-- `*.png`: screenshots or reference images.
-
-Keep new additions in the root unless there is a clear reason to create a new folder (for example, `docs/` for long-form guides).
+```
+openclaw/
+├── SKILL.md                    # Master skill (lqj-OpenClaw-skill) - all maintenance rules
+├── CLAUDE.md                   # Project documentation for AI agents
+├── AGENTS.md                   # This file - repository guidelines
+├── README.md                   # Control center usage guide
+├── control-center/             # Web management UI
+│   ├── server.js               # Backend (pure Node.js HTTP server, port 18809)
+│   ├── public/                 # Frontend (vanilla HTML/CSS/JS)
+│   ├── start-control-center.ps1
+│   ├── test-control-center.ps1
+│   └── control-center-state.json
+├── ecc-heartbeat-skill/        # ECC heartbeat scheduler
+│   └── SKILL.md                # Triggers lqj-OpenClaw-skill on schedule
+├── self-improving-agent/       # Self-improvement skill
+│   ├── SKILL.md
+│   └── .learnings/             # Learnings, errors, feature requests
+├── lqj-OpenClaw-skill/         # Renamed skill directory (matches root SKILL.md)
+├── scripts/                    # Helper scripts
+│   ├── github-push.cmd
+│   ├── openclaw-dashboard-stable.cmd
+│   ├── openclaw-dashboard-direct.cmd
+│   └── openclaw-stop.cmd
+├── config/                     # Configuration files
+│   └── mcporter.json
+├── agents/                     # Agent configurations
+│   └── openai.yaml
+├── .claude/                    # Claude Code settings
+└── .trae/                      # Trae IDE settings and skills
+```
 
 ## Build, Test, and Development Commands
 
-There is no build or test pipeline in this repository. OpenClaw is managed in the WSL Ubuntu environment instead. Common commands:
+No build pipeline. The control center is a pure Node.js server with no dependencies.
 
-- `openclaw gateway status`: verify the gateway state.
-- `openclaw gateway start` / `openclaw gateway stop`: manage the service lifecycle.
-- `openclaw logs --follow`: tail runtime logs.
+```powershell
+# Start control center
+node control-center/server.js
 
-OpenClaw runs at `http://127.0.0.1:18790/` in WSL. Ensure `~/.npm-global/bin` and `~/node/bin` are on PATH before running commands.
+# Run control center regression test
+powershell -NoProfile -ExecutionPolicy Bypass -File "control-center/test-control-center.ps1"
+
+# Run Playwright E2E tests (if configured)
+cd control-center
+npx playwright test
+```
+
+OpenClaw CLI commands require environment variables:
+
+```powershell
+$env:OPENCLAW_CONFIG_PATH = "C:\Users\71976\.openclaw\openclaw.json"
+$env:OPENCLAW_STATE_DIR = "C:\Users\71976\.openclaw"
+& "C:\Program Files\nodejs\node.exe" "C:\Users\71976\AppData\Roaming\npm\node_modules\openclaw\dist\index.js" <command>
+```
 
 ## Coding Style & Naming Conventions
 
-- PowerShell scripts use 4-space indentation, Verb-Noun cmdlets, and `camelCase` variables.
-- Notes should be UTF-8 encoded, concise, and focused on one topic.
-- File names should be descriptive; include dates when the content is time-specific (for example, `2026-02-23-status.txt`).
+- PowerShell scripts: 4-space indentation, Verb-Noun cmdlets, `camelCase` variables
+- JavaScript (server.js): 2-space indentation, no semicolons, `camelCase`
+- Frontend (HTML/CSS/JS): vanilla, no framework, no build step
+- File names: descriptive, include dates for time-specific content
+- Skill names: lowercase with hyphens (e.g., `lqj-OpenClaw-skill`, `ecc-heartbeat`)
 
 ## Testing Guidelines
 
-There are no automated tests. When editing scripts, run them manually and confirm the expected behavior. Record any manual verification steps in a nearby note or in the script header.
+- Control center regression: `control-center/test-control-center.ps1`
+- E2E tests: `control-center/tests/e2e/control-center.spec.js` (Playwright)
+- Manual verification: check `http://127.0.0.1:18789/` and `http://127.0.0.1:18809/`
+- After config changes: run `openclaw config validate` and `openclaw models status --plain`
 
 ## Commit & Pull Request Guidelines
 
-No Git history is present in this workspace. If the repository is tracked, prefer Conventional Commit messages (for example, `docs: update OpenClaw notes`). Pull requests should summarize the change, list affected files, and mention any operational impact (port changes, service restarts). Include screenshots for UI-affecting updates.
+Prefer Conventional Commit messages:
+- `feat:` new features
+- `fix:` bug fixes
+- `docs:` documentation changes
+- `refactor:` code restructuring
+- `perf:` performance improvements
+- `chore:` maintenance tasks
 
 ## Security & Configuration Tips
 
-Avoid committing secrets. Store API keys in a secure vault and reference them in notes without the raw value. If sensitive files already exist, restrict sharing and redact before publishing.
+- Never commit plaintext secrets to the repository
+- Use SecretRef objects in `openclaw.json` pointing to `HKCU\Environment`
+- Required env vars: `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `OPENCLAW_FEISHU_APP_SECRET`, `OPENCLAW_GATEWAY_TOKEN`, `MINIMAX_API_KEY`, `OPENAI_API_KEY`
+- After secret changes: run `openclaw secrets audit --check`
+
+## ECC Heartbeat
+
+The `ecc-heartbeat` skill triggers `lqj-OpenClaw-skill` on schedule (every 30 mins). The heartbeat is a simple scheduler - all maintenance logic lives in `lqj-OpenClaw-skill` (root `SKILL.md`).
